@@ -1,14 +1,24 @@
-import { GroupAPreviewGame } from '@/components/games/GroupAPreviewGame';
 import { ComingSoonGame } from '@/components/games/ComingSoonGame';
+import { FlashcardsGame } from '@/components/games/FlashcardsGame';
+import { MatchingGame } from '@/components/games/MatchingGame';
+import { QuizGame } from '@/components/games/QuizGame';
+import { StudyTableGame } from '@/components/games/StudyTableGame';
 import type { GameComponentProps } from '@/components/games/types';
 import { GameType, PHASE5_AVAILABLE_GAMES } from '@/types/game';
 
 export function getGameComponent(gameType: GameType) {
-  if (PHASE5_AVAILABLE_GAMES.has(gameType)) {
-    return GroupAPreviewGame;
+  switch (gameType) {
+    case GameType.StudyTable:
+      return StudyTableGame;
+    case GameType.Flashcards:
+      return FlashcardsGame;
+    case GameType.Quiz:
+      return QuizGame;
+    case GameType.Matching:
+      return MatchingGame;
+    default:
+      return ComingSoonGame;
   }
-
-  return ComingSoonGame;
 }
 
 export function isValidGameType(value: string): value is GameType {
