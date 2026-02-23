@@ -1,0 +1,17 @@
+.textarea {
+  @apply w-full rounded-2xl border px-4 py-3 text-sm outline-none transition;
+  min-height: 132px;
+  resize: vertical;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.textarea:focus {
+  border-color: rgba(243, 87, 87, 0.5);
+  box-shadow: 0 0 0 4px rgba(243, 87, 87, 0.08);
+}

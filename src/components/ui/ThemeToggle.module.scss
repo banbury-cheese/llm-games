@@ -1,0 +1,22 @@
+.toggle {
+  @apply relative inline-flex h-11 w-[84px] items-center rounded-full border p-1;
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.thumb {
+  @apply absolute left-1 top-1 flex h-9 w-9 items-center justify-center rounded-full text-sm;
+  background: linear-gradient(135deg, #ecd227 0%, #f2995e 100%);
+  box-shadow: 0 8px 16px rgba(236, 104, 62, 0.28);
+  transition: transform 220ms ease;
+}
+
+.dark .thumb {
+  transform: translateX(40px);
+  background: linear-gradient(135deg, #7fb2ff 0%, #afa3ff 100%);
+}
+
+.icons {
+  @apply flex w-full items-center justify-between px-2 text-xs font-semibold;
+  color: var(--text-muted);
+}

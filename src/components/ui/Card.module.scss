@@ -1,0 +1,27 @@
+.card {
+  @apply rounded-[20px] border p-4 sm:p-5;
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: var(--shadow);
+  transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.interactive {
+  cursor: pointer;
+}
+
+.interactive:hover {
+  transform: translateY(-2px);
+}
+
+.paddingSm {
+  @apply p-3;
+}
+
+.paddingMd {
+  @apply p-4 sm:p-5;
+}
+
+.paddingLg {
+  @apply p-5 sm:p-6;
+}

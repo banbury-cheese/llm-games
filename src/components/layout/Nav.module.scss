@@ -1,0 +1,42 @@
+.nav {
+  @apply sticky top-3 z-40 mb-4 w-full rounded-[24px] border px-3 py-3 sm:top-4 sm:px-4;
+  background: color-mix(in srgb, var(--header-bg) 88%, transparent);
+  border-color: var(--border);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.row {
+  @apply flex flex-wrap items-center justify-between gap-3;
+}
+
+.brand {
+  @apply inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.logo {
+  @apply grid h-7 w-7 place-items-center rounded-xl text-sm;
+  background: linear-gradient(135deg, #afa3ff 0%, #7fb2ff 100%);
+}
+
+.links {
+  @apply flex flex-wrap items-center gap-2;
+}
+
+.link {
+  @apply rounded-full px-3 py-2 text-sm font-medium transition-colors;
+  color: var(--text-muted);
+}
+
+.link:hover,
+.linkActive {
+  @apply text-[var(--text)];
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.actions {
+  @apply flex items-center gap-2;
+}

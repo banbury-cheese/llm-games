@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f5f0eb;
+  --surface: #ffffff;
+  --surface-elevated: #fbf7f3;
+  --surface-ghost: rgba(255, 255, 255, 0.65);
+  --text: #141414;
+  --text-muted: #55514c;
+  --border: rgba(20, 20, 20, 0.1);
+  --shadow: 0 10px 35px rgba(15, 15, 15, 0.08);
+  --header-bg: rgba(245, 240, 235, 0.8);
+  --ring: rgba(243, 87, 87, 0.35);
+  --color-primary: #f35757;
+  --color-secondary: #ec683e;
+  --color-accent: #afa3ff;
+}
+
+html.theme-dark {
+  --bg: #1e1e1e;
+  --surface: #242424;
+  --surface-elevated: #2a2a2a;
+  --surface-ghost: rgba(36, 36, 36, 0.74);
+  --text: #f4f2ef;
+  --text-muted: #bfb8af;
+  --border: rgba(255, 255, 255, 0.1);
+  --shadow: 0 16px 42px rgba(0, 0, 0, 0.32);
+  --header-bg: rgba(30, 30, 30, 0.8);
+  --ring: rgba(243, 87, 87, 0.3);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--bg);
+}
+
+body {
+  @apply m-0 min-h-screen font-display antialiased;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(175, 163, 255, 0.16), transparent 42%),
+    radial-gradient(circle at 90% 10%, rgba(236, 210, 39, 0.11), transparent 38%),
+    radial-gradient(circle at 8% 90%, rgba(127, 178, 255, 0.14), transparent 44%),
+    radial-gradient(circle at 88% 86%, rgba(243, 87, 87, 0.11), transparent 42%),
+    var(--bg);
+  color: var(--text);
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+::selection {
+  background: rgba(243, 87, 87, 0.2);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-shell {
+  @apply mx-auto min-h-screen w-full max-w-[1400px] px-4 pb-10 sm:px-6 lg:px-8;
+}
+
+.page-shell {
+  @apply mx-auto w-full max-w-6xl pb-10 pt-6 sm:pt-8;
+}
+
+.surface-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+html.theme-light .grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(20, 20, 20, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(20, 20, 20, 0.04) 1px, transparent 1px);
+}

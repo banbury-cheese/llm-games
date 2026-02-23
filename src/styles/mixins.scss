@@ -1,0 +1,21 @@
+@mixin tilted-card($rotation: 0deg) {
+  transform: rotate($rotation);
+  transform-origin: center;
+}
+
+@mixin glass-panel($alpha: 0.7) {
+  background: rgba(255, 255, 255, $alpha);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+@mixin dark-glass-panel($alpha: 0.08) {
+  background: rgba(255, 255, 255, $alpha);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+@mixin focus-ring {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(243, 87, 87, 0.24), 0 0 0 4px rgba(243, 87, 87, 0.1);
+}
