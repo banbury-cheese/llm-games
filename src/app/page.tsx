@@ -1,82 +1,80 @@
-import Link from 'next/link';
+'use client';
 
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
+import { useEffect, useRef, useState } from 'react';
 
-export default function HomePage() {
+import { SetGrid } from '@/components/dashboard/SetGrid';
+import { Modal } from '@/components/ui/Modal';
+import { initGSAP } from '@/lib/gsap';
+import { studySetStore } from '@/lib/storage';
+import type { StudySet } from '@/types/study-set';
+
+export default function DashboardPage() {
+  const [sets, setSets] = useState<StudySet[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<StudySet | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setSets(studySetStore.list());
+  }, []);
+
+  useEffect(() => {
+    const gsap = initGSAP();
+    const ctx = gsap.context(() => {
+      gsap.from('[data-set-card]', {
+        y: 18,
+        autoAlpha: 0,
+        scale: 0.98,
+        duration: 0.38,
+        ease: 'power2.out',
+        stagger: 0.06,
+      });
+    }, rootRef);
+
+    return () => ctx.revert();
+  }, [sets.length]);
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    studySetStore.delete(pendingDelete.id);
+    setSets(studySetStore.list());
+    setPendingDelete(null);
+  };
+
   return (
-    <section className="space-y-6">
-      <div className="space-y-3">
-        <p
-          className="inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]"
-          style={{ borderColor: 'var(--border)' }}
-        >
-          Phase 1 Foundation
-        </p>
-        <h1 className="text-4xl font-semibold leading-tight sm:text-5xl lg:text-6xl">
-          Build study sets into a playful mini-game arcade.
-        </h1>
-        <p className="max-w-2xl text-base leading-7 text-[var(--text-muted)] sm:text-lg">
-          Theme system, shared UI, storage helpers, and app shell are ready. Next phases add LLM generation,
-          creation flow, dashboard cards, and games.
-        </p>
+    <section ref={rootRef} className="space-y-5 sm:space-y-6">
+      <div className="flex flex-col gap-4 rounded-[30px] border p-5 sm:p-6 lg:flex-row lg:items-end lg:justify-between" style={{ borderColor: 'var(--border)', background: 'var(--surface-ghost)' }}>
+        <div className="space-y-2">
+          <p className="inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]" style={{ borderColor: 'var(--border)' }}>
+            Study Arcade Dashboard
+          </p>
+          <h1 className="text-3xl font-semibold leading-tight sm:text-4xl lg:text-5xl">Your study sets</h1>
+          <p className="max-w-2xl text-sm leading-6 text-[var(--text-muted)] sm:text-base">
+            Colorful tilted cards, local-first persistence, and a game-selector flow optimized for fast iteration.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="rounded-full border px-3 py-2 font-semibold" style={{ borderColor: 'var(--border)' }}>
+            {sets.length} set{sets.length === 1 ? '' : 's'}
+          </span>
+          <span className="rounded-full bg-olive px-3 py-2 font-semibold text-black">Responsive</span>
+          <span className="rounded-full bg-lavender px-3 py-2 font-semibold text-black">Local Storage</span>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-[1.1fr_0.9fr]">
-        <Card className="grid-bg relative overflow-hidden rounded-[28px] border-0 bg-[var(--surface-elevated)] p-5 sm:p-6">
-          <div className="space-y-4">
-            <div className="flex flex-wrap gap-2 text-xs font-semibold text-[var(--text-muted)]">
-              <span className="rounded-full bg-coral px-3 py-1 text-white">12 games</span>
-              <span className="rounded-full bg-olive px-3 py-1 text-black">LLM-powered</span>
-              <span className="rounded-full bg-lavender px-3 py-1 text-black">Local-first</span>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {[
-                ['Flashcards', '#F35757', '-3deg'],
-                ['Quiz', '#ECD227', '2deg'],
-                ['Matching', '#AFA3FF', '-2deg'],
-                ['Study Table', '#7FB2FF', '3deg'],
-              ].map(([label, color, rotate], index) => (
-                <div
-                  key={label}
-                  className="rounded-3xl p-4 text-sm font-semibold text-black shadow-card"
-                  style={{ background: color, transform: `rotate(${rotate})`, marginTop: index % 2 ? '0.75rem' : 0 }}
-                >
-                  {label}
-                </div>
-              ))}
-            </div>
-          </div>
-        </Card>
+      <SetGrid sets={sets} onDelete={setPendingDelete} />
 
-        <Card className="rounded-[28px] p-5 sm:p-6">
-          <div className="space-y-4">
-            <h2 className="text-xl font-semibold sm:text-2xl">Start a study set</h2>
-            <p className="text-sm leading-6 text-[var(--text-muted)]">
-              Paste text, upload a PDF, or enter a topic. Review extracted terms, then launch a game grid.
-            </p>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center justify-between rounded-2xl border px-3 py-2" style={{ borderColor: 'var(--border)' }}>
-                <span>Theme toggle</span>
-                <span className="font-semibold text-olive">Ready</span>
-              </div>
-              <div className="flex items-center justify-between rounded-2xl border px-3 py-2" style={{ borderColor: 'var(--border)' }}>
-                <span>Local storage</span>
-                <span className="font-semibold text-olive">Ready</span>
-              </div>
-              <div className="flex items-center justify-between rounded-2xl border px-3 py-2" style={{ borderColor: 'var(--border)' }}>
-                <span>LLM APIs</span>
-                <span className="font-semibold text-yellow">Next phase</span>
-              </div>
-            </div>
-            <Link href="/create">
-              <Button size="lg" fullWidth>
-                Go to Create Flow
-              </Button>
-            </Link>
-          </div>
-        </Card>
-      </div>
+      <Modal
+        open={Boolean(pendingDelete)}
+        title="Delete study set"
+        onClose={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
+        confirmLabel="Delete"
+      >
+        <p>
+          Delete <strong>{pendingDelete?.title}</strong>? This removes cached game data and terms from localStorage.
+        </p>
+      </Modal>
     </section>
   );
 }
