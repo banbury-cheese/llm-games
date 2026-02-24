@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { useChatTutor } from '@/lib/chat-tutor';
 import type { Term } from '@/types/study-set';
 
 import type { GameComponentProps } from '@/components/games/types';
@@ -65,7 +66,33 @@ function normalizeQuestions(data: unknown, fallbackTerms: Term[]): QuizQuestion[
   return buildFallbackQuiz(fallbackTerms);
 }
 
+function buildQuizExplainPrompt(question: QuizQuestion, selectedIndex: number | undefined) {
+  const chosenAnswer = typeof selectedIndex === 'number' ? question.options[selectedIndex] : 'No answer selected';
+  const correctAnswer = question.options[question.correctIndex];
+  const isCorrect = typeof selectedIndex === 'number' && selectedIndex === question.correctIndex;
+
+  return [
+    'I am taking a quiz on this material and was given this question:',
+    `'${question.prompt}'`,
+    '',
+    'I chose this as the answer:',
+    `'${chosenAnswer}'`,
+    '',
+    isCorrect
+      ? `That answer was correct. The correct answer is '${correctAnswer}'.`
+      : `That answer was incorrect. The correct answer is '${correctAnswer}'.`,
+    question.explanation ? `The quiz explanation shown was: '${question.explanation}'` : null,
+    '',
+    isCorrect
+      ? 'Help me understand why this answer is correct and how to recognize similar questions'
+      : 'Help me understand why my answer was incorrect',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 export function QuizGame({ studySet, data }: GameComponentProps) {
+  const { openTutor } = useChatTutor();
   const questions = useMemo(() => normalizeQuestions(data, studySet.terms), [data, studySet.terms]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number>>({});
@@ -130,15 +157,22 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-[var(--text-muted)]">Question {index + 1}</p>
-                    <span
-                      className="rounded-full px-3 py-1 text-xs font-semibold"
-                      style={{
-                        background: correct ? 'rgba(166,190,89,0.18)' : 'rgba(243,87,87,0.14)',
-                        color: correct ? '#7f9d28' : '#d63f3f',
-                      }}
-                    >
-                      {correct ? 'Correct' : 'Incorrect'}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className="rounded-full px-3 py-1 text-xs font-semibold"
+                        style={{
+                          background: correct ? 'rgba(166,190,89,0.18)' : 'rgba(243,87,87,0.14)',
+                          color: correct ? '#7f9d28' : '#d63f3f',
+                        }}
+                      >
+                        {correct ? 'Correct' : 'Incorrect'}
+                      </span>
+                      {typeof selected === 'number' ? (
+                        <Button type="button" size="sm" variant="ghost" onClick={() => openAiExplain(question, selected)}>
+                          AI Explain
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                   <p className="font-semibold leading-6">{question.prompt}</p>
                   <div className="space-y-2">
@@ -178,6 +212,15 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
   const selectedIndex = answers[currentQuestion.id];
   const isAnswered = typeof selectedIndex === 'number';
   const isCorrect = isAnswered && selectedIndex === currentQuestion.correctIndex;
+  const openAiExplain = (question: QuizQuestion, answerIndex: number | undefined) => {
+    openTutor({
+      sessionKey: `study-set:${studySet.id}`,
+      setTitle: studySet.title,
+      terms: studySet.terms,
+      initialMessage: buildQuizExplainPrompt(question, answerIndex),
+      autoSend: true,
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -253,8 +296,21 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
                 background: isCorrect ? 'rgba(166,190,89,0.08)' : 'rgba(243,87,87,0.08)',
               }}
             >
-              <p className="font-semibold">{isCorrect ? 'Correct' : 'Not quite'}</p>
-              {currentQuestion.explanation ? <p className="mt-1">{currentQuestion.explanation}</p> : null}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-semibold">{isCorrect ? 'Correct' : 'Not quite'}</p>
+                  {currentQuestion.explanation ? <p className="mt-1">{currentQuestion.explanation}</p> : null}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => openAiExplain(currentQuestion, selectedIndex)}
+                  className="shrink-0"
+                >
+                  AI Explain
+                </Button>
+              </div>
             </div>
           ) : null}
 

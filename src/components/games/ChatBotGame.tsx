@@ -1,51 +1,40 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
+import { MarkdownMessage } from '@/components/chat/MarkdownMessage';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
-import { aiSettingsStore } from '@/lib/storage';
 import { initGSAP } from '@/lib/gsap';
-import type { Term } from '@/types/study-set';
+import { useChatTutor } from '@/lib/chat-tutor';
 
 import type { GameComponentProps } from '@/components/games/types';
 
-type ChatMessage = {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-};
-
-function createId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function seedPrompts(terms: Term[]) {
-  const first = terms[0];
-  const second = terms[1];
-  return [
-    first ? `Teach me ${first.term} like I'm a beginner.` : 'Quiz me on these terms.',
-    second ? `Compare ${first?.term ?? 'the first term'} and ${second.term}.` : 'Give me a short quiz with 3 questions.',
-    'Make me a practice quiz based on this set.',
-  ].filter(Boolean);
-}
-
 export function ChatBotGame({ studySet }: GameComponentProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: createId(),
-      role: 'assistant',
-      content: `I’m your study tutor for “${studySet.title}”. Ask for explanations, quizzes, examples, or memory tricks.`,
-    },
-  ]);
-  const [inputValue, setInputValue] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    getSession,
+    getStarterPrompts,
+    setSessionInputValue,
+    sendMessage,
+    resetConversation,
+    attachContext,
+    openTutor,
+  } = useChatTutor();
 
+  const sessionKey = `study-set:${studySet.id}`;
+  const session = getSession(sessionKey);
+  const prompts = getStarterPrompts(sessionKey);
   const listRef = useRef<HTMLDivElement>(null);
-  const prompts = useMemo(() => seedPrompts(studySet.terms), [studySet.terms]);
+
+  useEffect(() => {
+    attachContext({
+      sessionKey,
+      setTitle: studySet.title,
+      terms: studySet.terms,
+    });
+  }, [attachContext, sessionKey, studySet.title, studySet.terms]);
 
   useEffect(() => {
     const container = listRef.current;
@@ -58,85 +47,10 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
     if (latest) {
       gsap.fromTo(latest, { y: 8, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.2, ease: 'power2.out' });
     }
-  }, [messages.length]);
+  }, [session.messages.length]);
 
   const submit = async (rawText?: string) => {
-    const text = (rawText ?? inputValue).trim();
-    if (!text || loading) return;
-
-    const settings = aiSettingsStore.get();
-    if (!settings.apiKey.trim()) {
-      setError('Add an API key in Settings before using Chat Bot.');
-      return;
-    }
-
-    setError(null);
-    setLoading(true);
-
-    const userMessage: ChatMessage = { id: createId(), role: 'user', content: text };
-    const assistantMessage: ChatMessage = { id: createId(), role: 'assistant', content: '' };
-    const nextMessages = [...messages, userMessage, assistantMessage];
-    setMessages(nextMessages);
-    setInputValue('');
-
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          setTitle: studySet.title,
-          terms: studySet.terms.map((term) => ({ term: term.term, definition: term.definition })),
-          messages: nextMessages
-            .filter((message) => message.id !== assistantMessage.id)
-            .map((message) => ({ role: message.role, content: message.content })),
-          settings,
-        }),
-      });
-
-      if (!response.ok || !response.body) {
-        let errorMessage = 'Chat request failed.';
-        try {
-          const payload = (await response.json()) as { error?: string };
-          errorMessage = payload.error || errorMessage;
-        } catch {
-          // ignore JSON parse errors for non-JSON error bodies
-        }
-        throw new Error(errorMessage);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let done = false;
-      let finalText = '';
-
-      while (!done) {
-        const chunk = await reader.read();
-        done = chunk.done;
-        if (chunk.value) {
-          finalText += decoder.decode(chunk.value, { stream: true });
-          setMessages((prev) =>
-            prev.map((message) =>
-              message.id === assistantMessage.id ? { ...message, content: finalText } : message,
-            ),
-          );
-        }
-      }
-
-      if (!finalText.trim()) {
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantMessage.id
-              ? { ...message, content: 'No response text returned.' }
-              : message,
-          ),
-        );
-      }
-    } catch (chatError) {
-      setError(chatError instanceof Error ? chatError.message : 'Unexpected chat error.');
-      setMessages((prev) => prev.filter((message) => message.id !== assistantMessage.id));
-    } finally {
-      setLoading(false);
-    }
+    await sendMessage(rawText, { sessionKey });
   };
 
   return (
@@ -145,23 +59,25 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-xl font-semibold sm:text-2xl">Chat Bot Tutor</h2>
-            <p className="text-sm leading-6 text-[var(--text-muted)]">Streaming tutor chat grounded in this study set’s terms and definitions.</p>
+            <p className="text-sm leading-6 text-[var(--text-muted)]">
+              Streaming tutor chat grounded in this study set’s terms and definitions.
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
-              variant="secondary"
-              onClick={() => {
-                setMessages([
-                  {
-                    id: createId(),
-                    role: 'assistant',
-                    content: `I’m your study tutor for “${studySet.title}”. Ask for explanations, quizzes, examples, or memory tricks.`,
-                  },
-                ]);
-                setError(null);
-              }}
+              variant="ghost"
+              onClick={() =>
+                openTutor({
+                  sessionKey,
+                  setTitle: studySet.title,
+                  terms: studySet.terms,
+                })
+              }
             >
+              Open Popup Tutor
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => resetConversation({ sessionKey })}>
               Reset Chat
             </Button>
           </div>
@@ -175,7 +91,7 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
               key={prompt}
               type="button"
               onClick={() => void submit(prompt)}
-              disabled={loading}
+              disabled={session.loading}
               className="rounded-full border px-3 py-2 text-xs font-semibold transition hover:opacity-90 disabled:opacity-60"
               style={{ borderColor: 'var(--border)', background: 'var(--surface-elevated)' }}
             >
@@ -185,9 +101,9 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
         </div>
       </Card>
 
-      <Card className="rounded-[28px] p-0 overflow-hidden">
+      <Card className="overflow-hidden rounded-[28px] p-0">
         <div ref={listRef} className="max-h-[520px] space-y-3 overflow-y-auto p-4 sm:p-5">
-          {messages.map((message) => (
+          {session.messages.map((message) => (
             <div
               key={message.id}
               data-chat-message
@@ -206,11 +122,13 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
                   {message.role === 'user' ? 'You' : 'Tutor'}
                 </p>
-                <p className="whitespace-pre-wrap break-words">{message.content || (loading && message.role === 'assistant' ? '…' : '')}</p>
+                {message.content || (session.loading && message.role === 'assistant') ? (
+                  <MarkdownMessage content={message.content || '…'} />
+                ) : null}
               </div>
             </div>
           ))}
-          {loading ? (
+          {session.loading ? (
             <div className="flex items-center gap-2 px-1 text-sm text-[var(--text-muted)]">
               <Spinner size="sm" /> Streaming response…
             </div>
@@ -227,21 +145,21 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
           }}
         >
           <Input
-            value={inputValue}
-            onChange={(event) => setInputValue(event.target.value)}
+            value={session.inputValue}
+            onChange={(event) => setSessionInputValue(event.target.value, sessionKey)}
             placeholder="Ask for explanations, quizzes, examples, or memory tricks…"
-            disabled={loading}
+            disabled={session.loading}
           />
-          {error ? (
+          {session.error ? (
             <div className="rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'rgba(243,87,87,0.4)', background: 'rgba(243,87,87,0.08)' }}>
-              {error}
+              {session.error}
             </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="submit" loading={loading} disabled={!inputValue.trim()}>
+            <Button type="submit" loading={session.loading} disabled={!session.inputValue.trim()}>
               Send
             </Button>
-            <span className="text-xs text-[var(--text-muted)]">Uses your saved provider/model settings.</span>
+            <span className="text-xs text-[var(--text-muted)]">Synced with the global AI Tutor popup for this deck.</span>
           </div>
         </form>
       </Card>

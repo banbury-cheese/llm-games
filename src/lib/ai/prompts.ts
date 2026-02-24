@@ -49,6 +49,17 @@ export function buildGamePrompt(gameType: GameType, terms: PromptTerm[]) {
 
 export function buildChatSystemPrompt(input: { setTitle?: string; terms: PromptTerm[] }) {
   const heading = input.setTitle?.trim() ? `Study set: ${input.setTitle}` : 'Study set';
+  if (!input.terms.length) {
+    return [
+      'You are a friendly tutor helping the user learn and reason through questions.',
+      'No structured term list is currently attached, so ask clarifying questions when needed and explain concepts clearly.',
+      'If the user pastes a quiz question or answer choice, analyze it carefully and teach the reasoning.',
+      '',
+      `${heading}`,
+      'No term list provided for this chat yet.',
+    ].join('\n');
+  }
+
   return [
     'You are a friendly tutor helping the user learn the provided study terms.',
     'Explain concepts clearly, quiz the user when appropriate, and stay grounded in the provided terms.',

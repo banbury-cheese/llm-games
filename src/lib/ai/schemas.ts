@@ -48,7 +48,7 @@ export const genericGameDataSchema = z.object({
 
 export const chatRequestSchema = z.object({
   setTitle: z.string().min(1).max(120).optional(),
-  terms: z.array(termSchema).min(1).max(60),
+  terms: z.array(termSchema).min(0).max(60),
   messages: z
     .array(
       z.object({

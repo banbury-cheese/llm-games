@@ -3,6 +3,7 @@ import { Inter_Tight } from 'next/font/google';
 
 import { Nav } from '@/components/layout/Nav';
 import { PageTransition } from '@/components/layout/PageTransition';
+import { ChatTutorProvider } from '@/lib/chat-tutor';
 import { ThemeProvider } from '@/lib/theme';
 
 import '@/styles/globals.scss';
@@ -24,12 +25,14 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" suppressHydrationWarning>
       <body className={interTight.variable}>
         <ThemeProvider>
-          <div className="app-shell">
-            <Nav />
-            <PageTransition>
-              <main className="page-shell">{children}</main>
-            </PageTransition>
-          </div>
+          <ChatTutorProvider>
+            <div className="app-shell">
+              <Nav />
+              <PageTransition>
+                <main className="page-shell">{children}</main>
+              </PageTransition>
+            </div>
+          </ChatTutorProvider>
         </ThemeProvider>
       </body>
     </html>

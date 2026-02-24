@@ -19,6 +19,7 @@ type SnowmanRound = {
 
 const MAX_WRONG = 6;
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+const BREAK_ORDER = [6, 5, 4, 3, 2, 1] as const;
 
 function normalizeWord(term: Term) {
   return term.term.replace(/[^a-zA-Z]/g, '').toUpperCase();
@@ -66,49 +67,99 @@ function SnowmanSvg({ wrongCount }: { wrongCount: number }) {
   const previousWrongRef = useRef(0);
 
   useEffect(() => {
-    if (wrongCount <= previousWrongRef.current) {
-      previousWrongRef.current = wrongCount;
-      return;
-    }
-
     const gsap = initGSAP();
     const svg = svgRef.current;
     if (!svg) return;
 
-    const target = svg.querySelector(`[data-snow-part=\"${wrongCount}\"]`);
-    if (target) {
-      gsap.fromTo(target, { autoAlpha: 0, scale: 0.6, transformOrigin: '50% 50%' }, { autoAlpha: 1, scale: 1, duration: 0.22, ease: 'back.out(1.6)' });
+    const parts = BREAK_ORDER.map((id) => ({
+      id,
+      el: svg.querySelector(`[data-snow-part="${id}"]`) as SVGElement | null,
+    })).filter((part): part is { id: (typeof BREAK_ORDER)[number]; el: SVGElement } => !!part.el);
+
+    const hiddenParts = new Set(BREAK_ORDER.slice(0, wrongCount));
+    const previous = previousWrongRef.current;
+
+    if (wrongCount < previous) {
+      parts.forEach(({ id, el }) => {
+        gsap.killTweensOf(el);
+        gsap.set(el, {
+          autoAlpha: hiddenParts.has(id) ? 0 : 1,
+          x: 0,
+          y: 0,
+          rotation: 0,
+          scale: 1,
+          transformOrigin: '50% 50%',
+        });
+      });
+      previousWrongRef.current = wrongCount;
+      return;
     }
+
+    if (wrongCount === previous) {
+      parts.forEach(({ id, el }) => {
+        gsap.set(el, {
+          autoAlpha: hiddenParts.has(id) ? 0 : 1,
+          x: 0,
+          y: 0,
+          rotation: 0,
+          scale: 1,
+          transformOrigin: '50% 50%',
+        });
+      });
+      previousWrongRef.current = wrongCount;
+      return;
+    }
+
+    const newlyBroken = BREAK_ORDER.slice(previous, wrongCount);
+    newlyBroken.forEach((id, index) => {
+      const target = parts.find((part) => part.id === id)?.el;
+      if (!target) return;
+
+      const driftX = id % 2 === 0 ? 18 : -18;
+      const driftY = id <= 2 ? 22 : 12;
+      const rotation = id % 2 === 0 ? 12 : -12;
+
+      gsap.killTweensOf(target);
+      gsap.to(target, {
+        autoAlpha: 0,
+        x: driftX,
+        y: driftY,
+        rotation,
+        scale: 0.78,
+        duration: 0.24,
+        delay: index * 0.02,
+        ease: 'power2.in',
+        transformOrigin: '50% 50%',
+      });
+    });
 
     previousWrongRef.current = wrongCount;
   }, [wrongCount]);
-
-  const isVisible = (n: number) => (wrongCount >= n ? 1 : 0);
 
   return (
     <svg ref={svgRef} viewBox="0 0 240 220" className="h-[220px] w-full max-w-[280px]" aria-label="Snowman progress illustration">
       <circle cx="120" cy="204" r="16" fill="#dfe8ff" opacity="0.35" />
       <ellipse cx="120" cy="207" rx="54" ry="9" fill="#9fb6e8" opacity="0.22" />
 
-      <g data-snow-part="1" opacity={isVisible(1)}>
+      <g data-snow-part="1">
         <circle cx="120" cy="168" r="28" fill="#f1f5ff" stroke="#b7c7ef" strokeWidth="3" />
       </g>
-      <g data-snow-part="2" opacity={isVisible(2)}>
+      <g data-snow-part="2">
         <circle cx="120" cy="122" r="22" fill="#f1f5ff" stroke="#b7c7ef" strokeWidth="3" />
       </g>
-      <g data-snow-part="3" opacity={isVisible(3)}>
+      <g data-snow-part="3">
         <circle cx="120" cy="84" r="17" fill="#f1f5ff" stroke="#b7c7ef" strokeWidth="3" />
       </g>
-      <g data-snow-part="4" opacity={isVisible(4)}>
+      <g data-snow-part="4">
         <line x1="100" y1="124" x2="77" y2="112" stroke="#7a532f" strokeWidth="4" strokeLinecap="round" />
         <line x1="140" y1="124" x2="163" y2="112" stroke="#7a532f" strokeWidth="4" strokeLinecap="round" />
       </g>
-      <g data-snow-part="5" opacity={isVisible(5)}>
+      <g data-snow-part="5">
         <circle cx="114" cy="81" r="2.3" fill="#232323" />
         <circle cx="126" cy="81" r="2.3" fill="#232323" />
         <polygon points="120,86 132,90 120,93" fill="#ec683e" />
       </g>
-      <g data-snow-part="6" opacity={isVisible(6)}>
+      <g data-snow-part="6">
         <rect x="103" y="56" width="34" height="9" rx="2" fill="#232323" />
         <rect x="111" y="39" width="18" height="20" rx="2" fill="#232323" />
       </g>
@@ -125,7 +176,7 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
   const [solvedCount, setSolvedCount] = useState(0);
   const [failedCount, setFailedCount] = useState(0);
   const [totalHintsUsed, setTotalHintsUsed] = useState(0);
-  const [status, setStatus] = useState('Guess letters to complete the word before the snowman finishes.');
+  const [status, setStatus] = useState('Guess letters to complete the word before the snowman breaks apart.');
 
   const current = rounds[roundIndex];
   const roundComplete = roundIndex >= rounds.length;
@@ -150,7 +201,7 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
     setWrongLetters([]);
     setUsedHint(false);
     if (roundIndex < rounds.length) {
-      setStatus('Guess letters to complete the word before the snowman finishes.');
+      setStatus('Guess letters to complete the word before the snowman breaks apart.');
     }
   }, [roundIndex, rounds.length]);
 
@@ -161,7 +212,7 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
       setStatus(`Solved! The answer was ${current.displayAnswer}.`);
     } else {
       setFailedCount((prev) => prev + 1);
-      setStatus(`Snowman complete. The answer was ${current.displayAnswer}.`);
+      setStatus(`Snowman broke apart. The answer was ${current.displayAnswer}.`);
     }
   }, [current]);
 
@@ -250,7 +301,7 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
               setSolvedCount(0);
               setFailedCount(0);
               setTotalHintsUsed(0);
-              setStatus('Guess letters to complete the word before the snowman finishes.');
+              setStatus('Guess letters to complete the word before the snowman breaks apart.');
             }}
           >
             Restart Snowman
@@ -268,7 +319,7 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-xl font-semibold sm:text-2xl">Snowman</h2>
-            <p className="text-sm text-[var(--text-muted)]">Guess the word letter by letter. Wrong guesses build the snowman.</p>
+            <p className="text-sm text-[var(--text-muted)]">Guess the word letter by letter. Wrong guesses break the snowman.</p>
           </div>
           <div className="flex flex-wrap gap-2 text-sm">
             <span className="rounded-full border px-3 py-2 font-semibold" style={{ borderColor: 'var(--border)' }}>
@@ -284,7 +335,7 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
           <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--surface-elevated)' }}>
             <div className="flex flex-col items-center gap-2">
               <SnowmanSvg wrongCount={wrongCount} />
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Snowman progress</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Snowman integrity</p>
             </div>
           </div>
 
