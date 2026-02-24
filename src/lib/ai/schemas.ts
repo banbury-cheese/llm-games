@@ -8,8 +8,8 @@ export const termSchema = z.object({
 });
 
 export const termExtractionSchema = z.object({
-  title: z.string().min(2).max(120).optional(),
-  description: z.string().min(2).max(240).optional(),
+  title: z.string().min(1).max(120),
+  description: z.string().min(1).max(240),
   terms: z.array(termSchema).min(4).max(40),
 });
 
@@ -24,7 +24,7 @@ export const matchingPairSchema = z.object({
 });
 
 export const matchingGameSchema = z.object({
-  instructions: z.string().min(1).optional(),
+  instructions: z.string().min(1),
   pairs: z.array(matchingPairSchema).min(4).max(10),
 });
 
@@ -33,17 +33,17 @@ export const quizQuestionSchema = z.object({
   prompt: z.string().min(1),
   options: z.array(z.string().min(1)).length(4),
   correctIndex: z.number().int().min(0).max(3),
-  explanation: z.string().min(1).optional(),
+  explanation: z.string().min(1),
 });
 
 export const quizGameSchema = z.object({
-  title: z.string().min(1).optional(),
+  title: z.string().min(1),
   questions: z.array(quizQuestionSchema).min(5).max(12),
 });
 
 export const genericGameDataSchema = z.object({
-  items: z.array(z.any()).default([]),
-  note: z.string().optional(),
+  items: z.array(z.unknown()),
+  note: z.string(),
 });
 
 export const chatRequestSchema = z.object({

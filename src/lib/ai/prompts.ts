@@ -35,8 +35,8 @@ export function buildGamePrompt(gameType: GameType, terms: PromptTerm[]) {
 
   const promptByGame: Partial<Record<GameType, string>> = {
     [GameType.Flashcards]: `Return the same terms cleaned up for flashcards. Keep definitions short and direct.\n\n${base}`,
-    [GameType.Matching]: `Create 6-8 matching pairs using the study set. Each pair should have id, term, and definition. Definitions must uniquely identify the term.\n\n${base}`,
-    [GameType.Quiz]: `Create 10 multiple-choice quiz questions from the study set. Each question must include a prompt, exactly 4 options, correctIndex (0-3), and a short explanation. Make distractors plausible but clearly wrong.\n\n${base}`,
+    [GameType.Matching]: `Create 6-8 matching pairs using the study set. Include an "instructions" string. Each pair should have id, term, and definition. Definitions must uniquely identify the term.\n\n${base}`,
+    [GameType.Quiz]: `Create a short quiz title and 10 multiple-choice quiz questions from the study set. Each question must include a prompt, exactly 4 options, correctIndex (0-3), and a short explanation. Make distractors plausible but clearly wrong.\n\n${base}`,
   };
 
   return {
