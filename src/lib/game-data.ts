@@ -11,6 +11,87 @@ function shuffle<T>(items: T[]) {
   return next;
 }
 
+function normalizeForWordGames(term: Term) {
+  const cleaned = term.term
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-zA-Z\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return cleaned;
+}
+
+function scrambleWord(word: string) {
+  const chars = word.split('');
+  let next = shuffle(chars);
+
+  // Avoid returning the same order when possible.
+  if (next.join('') === word && word.length > 1) {
+    next = [...chars.slice(1), chars[0]];
+  }
+
+  return next.join('');
+}
+
+function buildLocalTypeIn(terms: Term[]) {
+  return {
+    items: terms.slice(0, 20).map((term) => ({
+      id: term.id,
+      answer: term.term,
+      clue: term.definition,
+    })),
+  };
+}
+
+function buildLocalUnscramble(terms: Term[]) {
+  const candidates = terms
+    .map((term) => {
+      const normalized = normalizeForWordGames(term);
+      const answer = normalized.replace(/\s+/g, '');
+      return {
+        id: term.id,
+        answer,
+        displayAnswer: normalized,
+        clue: term.definition,
+      };
+    })
+    .filter((item) => item.answer.length >= 4 && item.answer.length <= 12)
+    .slice(0, 10);
+
+  return {
+    items: candidates.map((item) => ({
+      id: item.id,
+      answer: item.answer,
+      displayAnswer: item.displayAnswer,
+      clue: item.clue,
+      scrambled: scrambleWord(item.answer.toUpperCase()),
+    })),
+  };
+}
+
+function buildLocalSnowman(terms: Term[]) {
+  const rounds = terms
+    .map((term) => {
+      const normalized = normalizeForWordGames(term);
+      const answer = normalized.replace(/\s+/g, '').toUpperCase();
+      return {
+        id: term.id,
+        answer,
+        displayAnswer: normalized,
+        clue: term.definition,
+      };
+    })
+    .filter((item) => item.answer.length >= 4 && item.answer.length <= 12)
+    .slice(0, 8);
+
+  return {
+    rounds: rounds.map((round) => ({
+      ...round,
+      hint: `Starts with “${round.answer[0]}” and has ${round.answer.length} letters.`,
+    })),
+  };
+}
+
 function buildLocalQuiz(terms: Term[]) {
   const selected = terms.slice(0, 10);
   const questions = selected.map((term, index) => {
@@ -53,6 +134,14 @@ export function buildLocalGameData(gameType: GameType, studySet: StudySet) {
       };
     case GameType.Quiz:
       return buildLocalQuiz(studySet.terms);
+    case GameType.TypeIn:
+      return buildLocalTypeIn(studySet.terms);
+    case GameType.Unscramble:
+      return buildLocalUnscramble(studySet.terms);
+    case GameType.Snowman:
+      return buildLocalSnowman(studySet.terms);
+    case GameType.ChatBot:
+      return { items: [] };
     default:
       return { items: [] };
   }
@@ -64,7 +153,15 @@ export async function generateAndCacheGameData(studySet: StudySet, gameType: Gam
     return { data: cached, source: 'cache' as const };
   }
 
-  if (gameType === GameType.StudyTable || gameType === GameType.Flashcards || gameType === GameType.Matching) {
+  if (
+    gameType === GameType.StudyTable ||
+    gameType === GameType.Flashcards ||
+    gameType === GameType.Matching ||
+    gameType === GameType.TypeIn ||
+    gameType === GameType.Unscramble ||
+    gameType === GameType.Snowman ||
+    gameType === GameType.ChatBot
+  ) {
     const localData = buildLocalGameData(gameType, studySet);
     studySetStore.updateGameData(studySet.id, gameType, localData);
     return { data: localData, source: 'local' as const };

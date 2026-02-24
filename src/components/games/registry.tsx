@@ -1,10 +1,14 @@
 import { ComingSoonGame } from '@/components/games/ComingSoonGame';
+import { ChatBotGame } from '@/components/games/ChatBotGame';
 import { FlashcardsGame } from '@/components/games/FlashcardsGame';
 import { MatchingGame } from '@/components/games/MatchingGame';
 import { QuizGame } from '@/components/games/QuizGame';
+import { SnowmanGame } from '@/components/games/SnowmanGame';
 import { StudyTableGame } from '@/components/games/StudyTableGame';
+import { TypeInGame } from '@/components/games/TypeInGame';
+import { UnscrambleGame } from '@/components/games/UnscrambleGame';
 import type { GameComponentProps } from '@/components/games/types';
-import { GameType, PHASE5_AVAILABLE_GAMES } from '@/types/game';
+import { GameType, IMPLEMENTED_GAMES } from '@/types/game';
 
 export function getGameComponent(gameType: GameType) {
   switch (gameType) {
@@ -16,6 +20,14 @@ export function getGameComponent(gameType: GameType) {
       return QuizGame;
     case GameType.Matching:
       return MatchingGame;
+    case GameType.TypeIn:
+      return TypeInGame;
+    case GameType.ChatBot:
+      return ChatBotGame;
+    case GameType.Unscramble:
+      return UnscrambleGame;
+    case GameType.Snowman:
+      return SnowmanGame;
     default:
       return ComingSoonGame;
   }
@@ -26,7 +38,7 @@ export function isValidGameType(value: string): value is GameType {
 }
 
 export function isGameAvailableInCurrentBuild(gameType: GameType) {
-  return PHASE5_AVAILABLE_GAMES.has(gameType);
+  return IMPLEMENTED_GAMES.has(gameType);
 }
 
 export type { GameComponentProps };

@@ -58,12 +58,19 @@ export const GAME_ORDER: GameType[] = [
   GameType.Test,
 ];
 
-export const PHASE5_AVAILABLE_GAMES = new Set<GameType>([
+export const IMPLEMENTED_GAMES = new Set<GameType>([
   GameType.StudyTable,
   GameType.Flashcards,
   GameType.Quiz,
   GameType.Matching,
+  GameType.TypeIn,
+  GameType.ChatBot,
+  GameType.Unscramble,
+  GameType.Snowman,
 ]);
+
+// Backward-compatible alias used by existing files before Phase 6.
+export const PHASE5_AVAILABLE_GAMES = IMPLEMENTED_GAMES;
 
 export interface GameDescriptor {
   type: GameType;
@@ -76,5 +83,5 @@ export const GAME_CATALOG: GameDescriptor[] = GAME_ORDER.map((type) => ({
   type,
   label: GAME_LABELS[type],
   icon: GAME_ICONS[type],
-  available: PHASE5_AVAILABLE_GAMES.has(type),
+  available: IMPLEMENTED_GAMES.has(type),
 }));
