@@ -10,6 +10,7 @@ import {
   type TermExtractionResult,
 } from '@/lib/ai/schemas';
 import { GameType } from '@/types/game';
+import { STUDY_LIMITS } from '@/types/settings';
 
 function dedupeTerms(terms: TermExtractionResult['terms']) {
   const seen = new Set<string>();
@@ -19,6 +20,15 @@ function dedupeTerms(terms: TermExtractionResult['terms']) {
     seen.add(key);
     return true;
   });
+}
+
+function resolveMaxTermsPerDeck(settings: { maxTermsPerDeck?: number }) {
+  const raw = settings.maxTermsPerDeck;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return STUDY_LIMITS.maxTermsPerDeck.default;
+  return Math.min(
+    STUDY_LIMITS.maxTermsPerDeck.max,
+    Math.max(STUDY_LIMITS.maxTermsPerDeck.min, Math.round(raw)),
+  );
 }
 
 function localFallbackGameData(gameType: GameType, terms: Array<{ term: string; definition: string }>) {
@@ -62,11 +72,13 @@ export async function POST(request: Request) {
     }
 
     const { mode, settings } = parsed.data;
+    const maxTermsPerDeck = resolveMaxTermsPerDeck(settings);
 
     if (mode === 'extract-terms') {
       const promptData = buildTermExtractionPrompt({
         sourceText: parsed.data.inputText,
         topic: parsed.data.topic,
+        tutorInstruction: parsed.data.tutorInstruction,
       });
 
       try {
@@ -79,7 +91,7 @@ export async function POST(request: Request) {
 
         return NextResponse.json({
           ...result.object,
-          terms: dedupeTerms(result.object.terms),
+          terms: dedupeTerms(result.object.terms).slice(0, maxTermsPerDeck),
           source: 'llm',
         });
       } catch (error) {
@@ -110,7 +122,7 @@ export async function POST(request: Request) {
         return NextResponse.json({
           title: parsed.data.topic?.trim() || 'New Study Set',
           description: 'Generated locally because LLM extraction was unavailable.',
-          terms: dedupeTerms(fallbackTerms),
+          terms: dedupeTerms(fallbackTerms).slice(0, maxTermsPerDeck),
           source: 'fallback',
           warning: error instanceof Error ? error.message : 'LLM extraction failed.',
         });

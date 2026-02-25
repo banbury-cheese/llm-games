@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/Input';
 import { aiSettingsStore } from '@/lib/storage';
 import { getDefaultModelForProvider } from '@/lib/ai/providers';
 import type { AIProvider } from '@/types/settings';
-import { DEFAULT_AI_SETTINGS, type AISettings } from '@/types/settings';
+import { DEFAULT_AI_SETTINGS, STUDY_LIMITS, type AISettings } from '@/types/settings';
 
 const providerDescriptions: Record<AIProvider, string> = {
   openai: 'Best general-purpose choice for fast MVP generation and quiz content.',
@@ -31,6 +31,12 @@ export default function SettingsPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const updateNumber = (key: 'maxTermsPerDeck' | 'maxCardsPerGame', rawValue: string) => {
+    const next = Number.parseInt(rawValue, 10);
+    if (!Number.isFinite(next)) return;
+    update(key, next);
+  };
+
   const onProviderChange = (provider: AIProvider) => {
     setSaved(false);
     setForm((prev) => ({
@@ -45,6 +51,7 @@ export default function SettingsPage() {
 
   const saveSettings = () => {
     aiSettingsStore.set(form);
+    setForm(aiSettingsStore.get());
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1200);
   };
@@ -121,6 +128,56 @@ export default function SettingsPage() {
               <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
                 MVP tradeoff: keys are stored client-side only. Do not use production credentials here.
               </p>
+            </div>
+
+            <div
+              className="rounded-2xl border p-4 sm:p-5"
+              style={{ borderColor: 'var(--border)', background: 'var(--surface-elevated)' }}
+            >
+              <div className="space-y-1">
+                <h3 className="text-sm font-semibold">Study Limits</h3>
+                <p className="text-xs leading-5 text-[var(--text-muted)]">
+                  Global caps for deck size and game item/card counts. Existing cached game data may need a reset/regeneration to reflect changes.
+                </p>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="maxTermsPerDeck" className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                    Max Terms Per Deck
+                  </label>
+                  <Input
+                    id="maxTermsPerDeck"
+                    type="number"
+                    inputMode="numeric"
+                    min={STUDY_LIMITS.maxTermsPerDeck.min}
+                    max={STUDY_LIMITS.maxTermsPerDeck.max}
+                    value={form.maxTermsPerDeck}
+                    onChange={(event) => updateNumber('maxTermsPerDeck', event.target.value)}
+                  />
+                  <p className="mt-2 text-xs text-[var(--text-muted)]">
+                    Range: {STUDY_LIMITS.maxTermsPerDeck.min}-{STUDY_LIMITS.maxTermsPerDeck.max}
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="maxCardsPerGame" className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                    Max Cards/Items Per Game
+                  </label>
+                  <Input
+                    id="maxCardsPerGame"
+                    type="number"
+                    inputMode="numeric"
+                    min={STUDY_LIMITS.maxCardsPerGame.min}
+                    max={STUDY_LIMITS.maxCardsPerGame.max}
+                    value={form.maxCardsPerGame}
+                    onChange={(event) => updateNumber('maxCardsPerGame', event.target.value)}
+                  />
+                  <p className="mt-2 text-xs text-[var(--text-muted)]">
+                    Range: {STUDY_LIMITS.maxCardsPerGame.min}-{STUDY_LIMITS.maxCardsPerGame.max}
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

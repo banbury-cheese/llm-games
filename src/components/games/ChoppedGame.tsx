@@ -33,7 +33,11 @@ function shuffle<T>(items: T[]) {
 }
 
 function cleanLetters(value: string) {
-  return value.replace(/[^a-zA-Z]/g, '').toUpperCase();
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z]/g, '')
+    .toUpperCase();
 }
 
 function splitIntoChunks(answer: string, seed: number) {
@@ -52,6 +56,23 @@ function splitIntoChunks(answer: string, seed: number) {
   return chunks.filter(Boolean);
 }
 
+function normalizeChunksForAnswer(rawChunks: unknown, answer: string, seed: number) {
+  if (!Array.isArray(rawChunks)) return splitIntoChunks(answer, seed);
+
+  const cleaned = rawChunks
+    .filter((chunk): chunk is string => typeof chunk === 'string')
+    .map(cleanLetters)
+    .filter(Boolean);
+
+  // LLM output can include invalid chunk sets (missing letters, wrong order, duplicates).
+  // Fall back to a deterministic split so every clue is always solvable.
+  if (cleaned.length >= 2 && cleaned.join('') === answer) {
+    return cleaned;
+  }
+
+  return splitIntoChunks(answer, seed);
+}
+
 function normalizePuzzles(data: unknown, fallbackTerms: Term[]): ChunkPuzzle[] {
   if (data && typeof data === 'object' && 'puzzles' in data && Array.isArray((data as { puzzles?: unknown[] }).puzzles)) {
     const puzzles = (data as { puzzles: unknown[] }).puzzles
@@ -59,9 +80,7 @@ function normalizePuzzles(data: unknown, fallbackTerms: Term[]): ChunkPuzzle[] {
       .map((item, index) => {
         const rawAnswer = typeof item.answer === 'string' ? item.answer : typeof item.term === 'string' ? item.term : '';
         const answer = cleanLetters(rawAnswer);
-        const chunks = Array.isArray(item.chunks)
-          ? item.chunks.filter((chunk): chunk is string => typeof chunk === 'string').map((chunk) => chunk.toUpperCase())
-          : splitIntoChunks(answer, index);
+        const chunks = normalizeChunksForAnswer(item.chunks, answer, index);
         return {
           id: typeof item.id === 'string' ? item.id : `${index + 1}`,
           answer,

@@ -1,28 +1,22 @@
+type PdfExtractResponse = {
+  text?: string;
+  error?: string;
+};
+
 export async function extractTextFromPdf(file: File) {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const formData = new FormData();
+  formData.append('file', file);
 
-  const loadingTask = pdfjs.getDocument(
-    {
-      data: new Uint8Array(arrayBuffer),
-      disableWorker: true,
-    } as unknown as Parameters<typeof pdfjs.getDocument>[0],
-  );
-  const pdf = await loadingTask.promise;
+  const response = await fetch('/api/pdf-extract', {
+    method: 'POST',
+    body: formData,
+  });
 
-  const pageTexts: string[] = [];
+  const payload = (await response.json()) as PdfExtractResponse;
 
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const content = await page.getTextContent();
-    const text = content.items
-      .map((item) => ('str' in item ? item.str : ''))
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (text) pageTexts.push(text);
+  if (!response.ok || typeof payload.text !== 'string') {
+    throw new Error(payload.error || 'Failed to extract PDF text.');
   }
 
-  return pageTexts.join('\n\n');
+  return payload.text;
 }

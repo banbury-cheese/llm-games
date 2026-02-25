@@ -13,13 +13,21 @@ export function PageTransition({ children }: { children: React.ReactNode }) {
     const node = ref.current;
     if (!node) return;
 
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const gsap = initGSAP();
+    gsap.killTweensOf(node);
+
+    if (prefersReducedMotion) {
+      gsap.set(node, { autoAlpha: 1, y: 0, clearProps: 'filter' });
+      return;
+    }
+
     gsap.fromTo(
       node,
-      { autoAlpha: 0, y: 10 },
-      { autoAlpha: 1, y: 0, duration: 0.35, ease: 'power2.out' },
+      { autoAlpha: 0, y: 12, filter: 'blur(8px)' },
+      { autoAlpha: 1, y: 0, filter: 'blur(0px)', duration: 0.42, ease: 'power2.out', clearProps: 'filter' },
     );
   }, [pathname]);
 
-  return <div ref={ref}>{children}</div>;
+  return <div ref={ref} className="will-change-transform">{children}</div>;
 }

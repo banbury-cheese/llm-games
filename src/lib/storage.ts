@@ -1,5 +1,5 @@
 import type { StudySet } from '@/types/study-set';
-import { DEFAULT_AI_SETTINGS, type AISettings } from '@/types/settings';
+import { DEFAULT_AI_SETTINGS, STUDY_LIMITS, type AISettings } from '@/types/settings';
 
 const isBrowser = typeof window !== 'undefined';
 
@@ -25,6 +25,33 @@ function writeJSON<T>(key: string, value: T) {
   window.localStorage.setItem(key, JSON.stringify(value));
 }
 
+function clampInt(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
+function sanitizeAISettings(input: Partial<AISettings>): AISettings {
+  const merged = { ...DEFAULT_AI_SETTINGS, ...input };
+  return {
+    provider: merged.provider,
+    model: typeof merged.model === 'string' ? merged.model : DEFAULT_AI_SETTINGS.model,
+    apiKey: typeof merged.apiKey === 'string' ? merged.apiKey : DEFAULT_AI_SETTINGS.apiKey,
+    maxTermsPerDeck: clampInt(
+      merged.maxTermsPerDeck,
+      DEFAULT_AI_SETTINGS.maxTermsPerDeck,
+      STUDY_LIMITS.maxTermsPerDeck.min,
+      STUDY_LIMITS.maxTermsPerDeck.max,
+    ),
+    maxCardsPerGame: clampInt(
+      merged.maxCardsPerGame,
+      DEFAULT_AI_SETTINGS.maxCardsPerGame,
+      STUDY_LIMITS.maxCardsPerGame.min,
+      STUDY_LIMITS.maxCardsPerGame.max,
+    ),
+  };
+}
+
 export const storage = {
   readJSON,
   writeJSON,
@@ -37,7 +64,7 @@ export const storage = {
 export const studySetStore = {
   list(): StudySet[] {
     const sets = readJSON<StudySet[]>(STORAGE_KEYS.studySets, []);
-    return [...sets].sort((a, b) => b.createdAt - a.createdAt);
+    return [...sets].sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
   },
   get(id: string): StudySet | null {
     return this.list().find((set) => set.id === id) ?? null;
@@ -78,13 +105,42 @@ export const studySetStore = {
     this.upsert(updated);
     return updated;
   },
+  removeGameData(id: string, gameKey: string) {
+    const set = this.get(id);
+    if (!set) return null;
+
+    const nextGameData = { ...set.gameData };
+    delete nextGameData[gameKey];
+
+    const updated: StudySet = {
+      ...set,
+      gameData: nextGameData,
+      updatedAt: Date.now(),
+    };
+
+    this.upsert(updated);
+    return updated;
+  },
+  clearGameData(id: string) {
+    const set = this.get(id);
+    if (!set) return null;
+
+    const updated: StudySet = {
+      ...set,
+      gameData: {},
+      updatedAt: Date.now(),
+    };
+
+    this.upsert(updated);
+    return updated;
+  },
 };
 
 export const aiSettingsStore = {
   get(): AISettings {
-    return { ...DEFAULT_AI_SETTINGS, ...readJSON<Partial<AISettings>>(STORAGE_KEYS.aiSettings, {}) };
+    return sanitizeAISettings(readJSON<Partial<AISettings>>(STORAGE_KEYS.aiSettings, {}));
   },
   set(settings: AISettings) {
-    writeJSON(STORAGE_KEYS.aiSettings, settings);
+    writeJSON(STORAGE_KEYS.aiSettings, sanitizeAISettings(settings));
   },
 };

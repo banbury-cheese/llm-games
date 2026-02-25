@@ -2,6 +2,8 @@ import { aiSettingsStore, studySetStore } from '@/lib/storage';
 import { GameType } from '@/types/game';
 import type { StudySet, Term } from '@/types/study-set';
 
+const GAME_DATA_ARRAY_KEYS = ['rows', 'cards', 'pairs', 'questions', 'items', 'rounds', 'puzzles', 'entries'] as const;
+
 function shuffle<T>(items: T[]) {
   const next = [...items];
   for (let i = next.length - 1; i > 0; i -= 1) {
@@ -9,6 +11,32 @@ function shuffle<T>(items: T[]) {
     [next[i], next[j]] = [next[j], next[i]];
   }
   return next;
+}
+
+function getGenerationLimits() {
+  const settings = aiSettingsStore.get();
+  return {
+    maxTermsPerDeck: settings.maxTermsPerDeck,
+    maxCardsPerGame: settings.maxCardsPerGame,
+  };
+}
+
+function capGameDataCollections(data: unknown, maxItems: number) {
+  if (!data || typeof data !== 'object') return data;
+
+  const record = data as Record<string, unknown>;
+  let changed = false;
+  const next: Record<string, unknown> = { ...record };
+
+  for (const key of GAME_DATA_ARRAY_KEYS) {
+    const value = record[key];
+    if (!Array.isArray(value)) continue;
+    if (value.length <= maxItems) continue;
+    next[key] = value.slice(0, maxItems);
+    changed = true;
+  }
+
+  return changed ? next : data;
 }
 
 function normalizeForWordGames(term: Term) {
@@ -268,47 +296,59 @@ function buildLocalQuiz(terms: Term[]) {
 }
 
 export function buildLocalGameData(gameType: GameType, studySet: StudySet) {
+  const { maxTermsPerDeck, maxCardsPerGame } = getGenerationLimits();
+  const limitedTerms = studySet.terms.slice(0, maxTermsPerDeck);
+
+  const localData = (() => {
   switch (gameType) {
     case GameType.StudyTable:
-      return { rows: studySet.terms };
+      return { rows: limitedTerms };
     case GameType.Flashcards:
-      return { cards: studySet.terms };
+      return { cards: limitedTerms };
     case GameType.Matching:
       return {
         instructions: 'Match each term to the correct definition.',
-        pairs: shuffle(studySet.terms)
+        pairs: shuffle(limitedTerms)
           .slice(0, 8)
           .map((term) => ({ id: term.id, term: term.term, definition: term.definition })),
       };
     case GameType.Quiz:
-      return buildLocalQuiz(studySet.terms);
+      return buildLocalQuiz(limitedTerms);
     case GameType.TypeIn:
-      return buildLocalTypeIn(studySet.terms);
+      return buildLocalTypeIn(limitedTerms);
     case GameType.HungryBug:
-      return buildLocalHungryBug(studySet.terms);
+      return buildLocalHungryBug(limitedTerms);
     case GameType.Unscramble:
-      return buildLocalUnscramble(studySet.terms);
+      return buildLocalUnscramble(limitedTerms);
     case GameType.Snowman:
-      return buildLocalSnowman(studySet.terms);
+      return buildLocalSnowman(limitedTerms);
     case GameType.BugMatch:
-      return buildLocalBugMatch(studySet.terms);
+      return buildLocalBugMatch(limitedTerms);
     case GameType.Chopped:
-      return buildLocalChopped(studySet.terms);
+      return buildLocalChopped(limitedTerms);
     case GameType.Crossword:
-      return buildLocalCrossword(studySet.terms);
+      return buildLocalCrossword(limitedTerms);
     case GameType.Test:
-      return buildLocalTest(studySet.terms);
+      return buildLocalTest(limitedTerms);
     case GameType.ChatBot:
       return { items: [] };
     default:
       return { items: [] };
   }
+  })();
+
+  return capGameDataCollections(localData, maxCardsPerGame);
 }
 
-export async function generateAndCacheGameData(studySet: StudySet, gameType: GameType) {
+export async function generateAndCacheGameData(
+  studySet: StudySet,
+  gameType: GameType,
+  options?: { force?: boolean },
+) {
+  const limits = getGenerationLimits();
   const cached = studySet.gameData?.[gameType];
-  if (cached) {
-    return { data: cached, source: 'cache' as const };
+  if (cached && !options?.force) {
+    return { data: capGameDataCollections(cached, limits.maxCardsPerGame), source: 'cache' as const };
   }
 
   if (
@@ -338,7 +378,9 @@ export async function generateAndCacheGameData(studySet: StudySet, gameType: Gam
       body: JSON.stringify({
         mode: 'game-data',
         gameType,
-        terms: studySet.terms.map((term) => ({ term: term.term, definition: term.definition })),
+        terms: studySet.terms
+          .slice(0, limits.maxTermsPerDeck)
+          .map((term) => ({ term: term.term, definition: term.definition })),
         settings,
       }),
     });
@@ -355,9 +397,10 @@ export async function generateAndCacheGameData(studySet: StudySet, gameType: Gam
       };
     }
 
-    studySetStore.updateGameData(studySet.id, gameType, payload.data);
+    const cappedData = capGameDataCollections(payload.data, limits.maxCardsPerGame);
+    studySetStore.updateGameData(studySet.id, gameType, cappedData);
     return {
-      data: payload.data,
+      data: cappedData,
       source: (payload.source as 'llm' | 'fallback' | undefined) ?? 'llm',
       warning: payload.warning,
     };

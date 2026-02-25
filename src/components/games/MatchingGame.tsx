@@ -45,7 +45,7 @@ function normalizePairs(data: unknown, fallbackTerms: Term[]): Pair[] {
       .filter((pair) => pair.term && pair.definition)
       .slice(0, 8);
 
-    if (pairs.length >= 4) return pairs;
+    if (pairs.length) return pairs;
   }
 
   return fallbackTerms.slice(0, 8).map((term, index) => ({

@@ -54,6 +54,7 @@ const OPTION_BG = [
   'rgba(166,190,89,0.12)',
   'rgba(175,163,255,0.12)',
 ];
+const ANT_MOVE_DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
 
 function shuffle<T>(items: T[]) {
   const next = [...items];
@@ -191,6 +192,32 @@ function movePoint(point: Point, direction: Direction) {
   return { x: Math.min(BOARD_COLS - 1, point.x + 1), y: point.y };
 }
 
+function moveAntsAroundBoard(ants: AntToken[], player: Point) {
+  if (!ants.length) return ants;
+
+  const reserved = new Set<string>([pointKey(player)]);
+
+  return ants.map((ant) => {
+    const candidatePoints = [ant.pos, ...shuffle(ANT_MOVE_DIRECTIONS).map((dir) => movePoint(ant.pos, dir))];
+    const seen = new Set<string>();
+    const uniqueCandidates = candidatePoints.filter((candidate) => {
+      const key = pointKey(candidate);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const chooseMovingFirst = Math.random() < 0.72;
+    const orderedCandidates = chooseMovingFirst
+      ? [...uniqueCandidates.filter((p) => !pointsEqual(p, ant.pos)), ant.pos]
+      : uniqueCandidates;
+
+    const nextPos = orderedCandidates.find((candidate) => !reserved.has(pointKey(candidate))) ?? ant.pos;
+    reserved.add(pointKey(nextPos));
+    return { ...ant, pos: nextPos };
+  });
+}
+
 export function BugMatchGame({ studySet, data }: GameComponentProps) {
   const questions = useMemo(() => normalizeQuestions(data, studySet.terms), [data, studySet.terms]);
   const [state, setState] = useState<BugMatchState>(() => createInitialState(questions.length, questions));
@@ -213,6 +240,8 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
   }, [questions]);
 
   const currentQuestion = questions[state.order[state.questionIndex]];
+  const antIdsKey = state.ants.map((ant) => ant.id).join('|');
+  const antIdList = useMemo(() => (antIdsKey ? antIdsKey.split('|') : []), [antIdsKey]);
   const elapsedMs = runStartedAt && running ? elapsedBaseMs + (clockNow - runStartedAt) : elapsedBaseMs;
   const progress = questions.length ? Math.round((Math.min(state.questionIndex, questions.length) / questions.length) * 100) : 0;
 
@@ -232,9 +261,25 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
   }, [running, runStartedAt, state.completed, state.gameOver]);
 
   useEffect(() => {
-    if (!state.ants.length) return;
+    if (state.gameOver || state.completed || !currentQuestion) return;
+
+    const interval = window.setInterval(() => {
+      setState((prev) => {
+        if (!prev.ants.length || prev.gameOver || prev.completed) return prev;
+        const movedAnts = moveAntsAroundBoard(prev.ants, prev.player);
+        const changed = movedAnts.some((ant, index) => !pointsEqual(ant.pos, prev.ants[index]?.pos ?? ant.pos));
+        if (!changed) return prev;
+        return { ...prev, ants: movedAnts };
+      });
+    }, running ? 360 : 520);
+
+    return () => window.clearInterval(interval);
+  }, [currentQuestion, running, state.completed, state.gameOver]);
+
+  useEffect(() => {
+    if (!antIdList.length) return;
     const gsap = initGSAP();
-    const nodes = state.ants.map((ant) => antRefs.current[ant.id]).filter(Boolean);
+    const nodes = antIdList.map((antId) => antRefs.current[antId]).filter(Boolean);
     if (!nodes.length) return;
 
     nodes.forEach((node, index) => {
@@ -251,12 +296,19 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
         ease: 'sine.inOut',
       });
     });
-    gsap.fromTo(nodes, { autoAlpha: 0, scale: 0.75 }, { autoAlpha: 1, scale: 1, duration: 0.2, stagger: 0.03, ease: 'back.out(1.2)' });
-
     return () => {
       nodes.forEach((node) => gsap.killTweensOf(node));
     };
-  }, [state.ants]);
+  }, [antIdList]);
+
+  useEffect(() => {
+    if (!antIdList.length) return;
+    const gsap = initGSAP();
+    const nodes = antIdList.map((antId) => antRefs.current[antId]).filter(Boolean);
+    if (!nodes.length) return;
+
+    gsap.fromTo(nodes, { autoAlpha: 0, scale: 0.75 }, { autoAlpha: 1, scale: 1, duration: 0.2, stagger: 0.03, ease: 'back.out(1.2)' });
+  }, [antIdList]);
 
   useEffect(() => {
     if (!state.eventKind) return;
@@ -475,7 +527,7 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
                   ref={(node) => {
                     antRefs.current[ant.id] = node;
                   }}
-                  className="absolute z-10 grid place-items-center rounded-full border text-base shadow-sm"
+                  className="absolute z-10 grid place-items-center rounded-full border text-base shadow-sm transition-[left,top] duration-300 ease-out will-change-[left,top,transform]"
                   style={{
                     left: `${ant.pos.x * cellWidth}%`,
                     top: `${ant.pos.y * cellHeight}%`,

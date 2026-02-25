@@ -216,6 +216,7 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
     openTutor({
       sessionKey: `study-set:${studySet.id}`,
       setTitle: studySet.title,
+      tutorInstruction: studySet.tutorInstruction,
       terms: studySet.terms,
       initialMessage: buildQuizExplainPrompt(question, answerIndex),
       autoSend: true,

@@ -28,6 +28,7 @@ type TutorMessage = {
 
 type TutorContextData = {
   setTitle?: string;
+  tutorInstruction?: string;
   terms: Array<Pick<Term, 'term' | 'definition'>>;
 };
 
@@ -42,6 +43,7 @@ type TutorSessionState = {
 type OpenTutorOptions = {
   sessionKey?: string;
   setTitle?: string;
+  tutorInstruction?: string;
   terms?: Array<Pick<Term, 'term' | 'definition'>>;
   initialMessage?: string;
   autoSend?: boolean;
@@ -62,6 +64,7 @@ type ResetTutorOptions = {
 type AttachTutorContextOptions = {
   sessionKey?: string;
   setTitle?: string;
+  tutorInstruction?: string;
   terms?: Array<Pick<Term, 'term' | 'definition'>>;
   resetConversation?: boolean;
 };
@@ -102,9 +105,15 @@ function normalizeTerms(terms?: Array<Pick<Term, 'term' | 'definition'>>) {
     .filter((term) => term.term && term.definition);
 }
 
-function buildTutorContext(options?: Pick<OpenTutorOptions, 'setTitle' | 'terms'>): TutorContextData {
+function normalizeTutorInstruction(value?: string) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.slice(0, 1200) : undefined;
+}
+
+function buildTutorContext(options?: Pick<OpenTutorOptions, 'setTitle' | 'terms' | 'tutorInstruction'>): TutorContextData {
   return {
     setTitle: options?.setTitle?.trim() || undefined,
+    tutorInstruction: normalizeTutorInstruction(options?.tutorInstruction),
     terms: normalizeTerms(options?.terms),
   };
 }
@@ -115,13 +124,25 @@ function emptyTutorContext(): TutorContextData {
 
 function buildGreeting(context: TutorContextData) {
   if (context.setTitle && context.terms.length) {
-    return `I’m your study tutor for “${context.setTitle}”. Ask for explanations, examples, mnemonics, or quiz help.`;
+    return context.tutorInstruction
+      ? `I’m your study tutor for “${context.setTitle}”. I’ll focus on: ${context.tutorInstruction}`
+      : `I’m your study tutor for “${context.setTitle}”. Ask for explanations, examples, mnemonics, or quiz help.`;
   }
 
-  return 'I’m your AI study tutor. Ask a question, paste a tricky prompt, or use “AI Explain” from a game to get help.';
+  return context.tutorInstruction
+    ? `I’m your AI study tutor. I’ll focus on: ${context.tutorInstruction}`
+    : 'I’m your AI study tutor. Ask a question, paste a tricky prompt, or use “AI Explain” from a game to get help.';
 }
 
 function buildStarterPromptsFromContext(context: TutorContextData) {
+  if (context.tutorInstruction && context.terms.length) {
+    return [
+      `Teach me this set with this focus: ${context.tutorInstruction}`,
+      'Quiz me on the parts most relevant to my focus.',
+      'What should I study first based on my goal?',
+    ];
+  }
+
   if (context.terms.length) {
     const first = context.terms[0];
     const second = context.terms[1];
@@ -133,7 +154,7 @@ function buildStarterPromptsFromContext(context: TutorContextData) {
   }
 
   return [
-    'Help me study more effectively.',
+    context.tutorInstruction ? `Help me learn this goal: ${context.tutorInstruction}` : 'Help me study more effectively.',
     'Explain this concept in simple terms.',
     'Make a short practice quiz for me.',
   ];
@@ -151,6 +172,7 @@ function createSessionState(contextData?: TutorContextData): TutorSessionState {
 
 function sameTutorContext(a: TutorContextData, b: TutorContextData) {
   if ((a.setTitle ?? '') !== (b.setTitle ?? '')) return false;
+  if ((a.tutorInstruction ?? '') !== (b.tutorInstruction ?? '')) return false;
   if (a.terms.length !== b.terms.length) return false;
 
   return a.terms.every((term, index) => {
@@ -242,7 +264,11 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
   const attachContext = useCallback(
     (options: AttachTutorContextOptions) => {
       const resolvedKey = normalizeSessionKey(options.sessionKey ?? activeSessionKeyRef.current);
-      const contextData = buildTutorContext({ setTitle: options.setTitle, terms: options.terms });
+      const contextData = buildTutorContext({
+        setTitle: options.setTitle,
+        tutorInstruction: options.tutorInstruction,
+        terms: options.terms,
+      });
 
       patchSession(resolvedKey, (session) => {
         const shouldSeedGreeting = options.resetConversation || session.messages.length === 0;
@@ -333,6 +359,7 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             setTitle: targetContext.setTitle,
+            tutorInstruction: targetContext.tutorInstruction,
             terms: targetContext.terms,
             messages: nextMessages
               .filter((message) => message.id !== assistantMessage.id)
@@ -406,10 +433,11 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
       setActiveSessionKey(resolvedKey);
       setIsOpen(true);
 
-      if (options?.setTitle || options?.terms) {
+      if (options?.setTitle || options?.terms || options?.tutorInstruction) {
         attachContext({
           sessionKey: resolvedKey,
           setTitle: options.setTitle,
+          tutorInstruction: options.tutorInstruction,
           terms: options.terms,
           resetConversation: options.resetConversation,
         });
@@ -428,8 +456,12 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
             void sendMessage(options.initialMessage, {
               sessionKey: resolvedKey,
               contextOverride:
-                options.setTitle || options.terms
-                  ? buildTutorContext({ setTitle: options.setTitle, terms: options.terms })
+                options.setTitle || options.terms || options.tutorInstruction
+                  ? buildTutorContext({
+                      setTitle: options.setTitle,
+                      tutorInstruction: options.tutorInstruction,
+                      terms: options.terms,
+                    })
                   : undefined,
               resetConversation: false,
             });
@@ -588,6 +620,17 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
                   >
                     {activeSession.contextData.terms.length ? `${activeSession.contextData.terms.length} terms loaded` : 'General tutor mode'}
                   </span>
+                  {activeSession.contextData.tutorInstruction ? (
+                    <span
+                      className="inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-semibold"
+                      style={{ borderColor: 'rgba(243,87,87,0.28)', background: 'rgba(243,87,87,0.07)' }}
+                      title={activeSession.contextData.tutorInstruction}
+                    >
+                      Focus: {activeSession.contextData.tutorInstruction.length > 72
+                        ? `${activeSession.contextData.tutorInstruction.slice(0, 72)}…`
+                        : activeSession.contextData.tutorInstruction}
+                    </span>
+                  ) : null}
                   <span className="text-xs text-[var(--text-muted)]">Uses your saved provider settings</span>
                 </div>
               </div>

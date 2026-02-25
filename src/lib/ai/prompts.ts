@@ -9,9 +9,10 @@ function termsBlock(terms: PromptTerm[]) {
     .join('\n');
 }
 
-export function buildTermExtractionPrompt(input: { sourceText?: string; topic?: string }) {
+export function buildTermExtractionPrompt(input: { sourceText?: string; topic?: string; tutorInstruction?: string }) {
   const sourceText = input.sourceText?.trim();
   const topic = input.topic?.trim();
+  const tutorInstruction = input.tutorInstruction?.trim();
 
   return {
     system:
@@ -22,6 +23,9 @@ export function buildTermExtractionPrompt(input: { sourceText?: string; topic?: 
         : null,
       topic
         ? `Generate a study set about this topic: ${topic}. Produce 8-16 foundational terms with concise definitions, plus a title and short description.`
+        : null,
+      tutorInstruction
+        ? `Learner goal / tutor instruction (use this to prioritize what the deck should help them learn): ${tutorInstruction}`
         : null,
     ]
       .filter(Boolean)
@@ -47,25 +51,38 @@ export function buildGamePrompt(gameType: GameType, terms: PromptTerm[]) {
   };
 }
 
-export function buildChatSystemPrompt(input: { setTitle?: string; terms: PromptTerm[] }) {
+export function buildChatSystemPrompt(input: { setTitle?: string; terms: PromptTerm[]; tutorInstruction?: string }) {
   const heading = input.setTitle?.trim() ? `Study set: ${input.setTitle}` : 'Study set';
+  const tutorInstruction = input.tutorInstruction?.trim();
   if (!input.terms.length) {
     return [
       'You are a friendly tutor helping the user learn and reason through questions.',
       'No structured term list is currently attached, so ask clarifying questions when needed and explain concepts clearly.',
       'If the user pastes a quiz question or answer choice, analyze it carefully and teach the reasoning.',
+      tutorInstruction
+        ? `Prioritize this user learning goal in your explanations: ${tutorInstruction}`
+        : null,
       '',
       `${heading}`,
       'No term list provided for this chat yet.',
-    ].join('\n');
+      tutorInstruction ? `Tutor focus: ${tutorInstruction}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
   return [
     'You are a friendly tutor helping the user learn the provided study terms.',
     'Explain concepts clearly, quiz the user when appropriate, and stay grounded in the provided terms.',
     'If a user asks something outside these terms, say so and answer briefly if still helpful.',
+    tutorInstruction
+      ? `Prioritize this user learning goal/focus when choosing explanations, examples, and comparisons: ${tutorInstruction}`
+      : null,
     '',
     `${heading}`,
+    tutorInstruction ? `Tutor focus: ${tutorInstruction}` : null,
     termsBlock(input.terms),
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }

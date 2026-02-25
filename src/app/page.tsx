@@ -4,17 +4,20 @@ import { useEffect, useRef, useState } from 'react';
 
 import { SetGrid } from '@/components/dashboard/SetGrid';
 import { Modal } from '@/components/ui/Modal';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { initGSAP } from '@/lib/gsap';
 import { studySetStore } from '@/lib/storage';
 import type { StudySet } from '@/types/study-set';
 
 export default function DashboardPage() {
   const [sets, setSets] = useState<StudySet[]>([]);
+  const [hydrating, setHydrating] = useState(true);
   const [pendingDelete, setPendingDelete] = useState<StudySet | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setSets(studySetStore.list());
+    setHydrating(false);
   }, []);
 
   useEffect(() => {
@@ -62,7 +65,21 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <SetGrid sets={sets} onDelete={setPendingDelete} />
+      {hydrating ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div
+              key={index}
+              className="h-full"
+              style={{ transform: `rotate(${(index % 2 === 0 ? -1 : 1) * (1 + (index % 3) * 0.3)}deg)` }}
+            >
+              <Skeleton className="h-[220px] rounded-[26px] border-0 shadow-card" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <SetGrid sets={sets} onDelete={setPendingDelete} />
+      )}
 
       <Modal
         open={Boolean(pendingDelete)}

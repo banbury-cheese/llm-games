@@ -6,6 +6,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { GameSelectorCard } from '@/components/games/GameSelectorCard';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { initGSAP } from '@/lib/gsap';
 import { studySetStore } from '@/lib/storage';
 import { GAME_CATALOG } from '@/types/game';
@@ -15,11 +17,15 @@ export default function SetPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const [studySet, setStudySet] = useState<StudySet | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pendingDelete, setPendingDelete] = useState<StudySet | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!params?.id) return;
+    setLoading(true);
     setStudySet(studySetStore.get(params.id));
+    setLoading(false);
   }, [params?.id]);
 
   useEffect(() => {
@@ -47,6 +53,44 @@ export default function SetPage() {
     }),
     [studySet],
   );
+
+  const clearCachedGameData = () => {
+    if (!studySet) return;
+    const updated = studySetStore.clearGameData(studySet.id);
+    if (!updated) return;
+    setStudySet(updated);
+  };
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    studySetStore.delete(pendingDelete.id);
+    setPendingDelete(null);
+    router.push('/');
+  };
+
+  if (loading) {
+    return (
+      <section className="space-y-5">
+        <Card className="rounded-[30px] p-5 sm:p-6">
+          <div className="space-y-3">
+            <Skeleton className="h-7 w-36 rounded-full" />
+            <Skeleton className="h-10 w-full max-w-[28rem]" />
+            <Skeleton className="h-5 w-full max-w-[34rem]" />
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Skeleton className="h-10 w-24 rounded-full" />
+              <Skeleton className="h-10 w-24 rounded-full" />
+              <Skeleton className="h-10 w-28 rounded-full" />
+            </div>
+          </div>
+        </Card>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, index) => (
+            <Skeleton key={index} className="h-[156px] rounded-[24px]" />
+          ))}
+        </div>
+      </section>
+    );
+  }
 
   if (!studySet) {
     return (
@@ -87,6 +131,18 @@ export default function SetPage() {
             <span className="rounded-full bg-lavender px-3 py-2 font-semibold text-black">
               {stats.cachedGames} cached
             </span>
+            <Button type="button" variant="ghost" onClick={() => router.push(`/create?edit=${studySet.id}&regen=1`)}>
+              Re-generate Terms
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => router.push(`/create?edit=${studySet.id}`)}>
+              Edit Set
+            </Button>
+            <Button type="button" variant="ghost" onClick={clearCachedGameData}>
+              Clear Game Cache
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setPendingDelete(studySet)}>
+              Delete
+            </Button>
             <Button type="button" variant="secondary" onClick={() => router.push('/')}>
               Dashboard
             </Button>
@@ -99,6 +155,18 @@ export default function SetPage() {
           <GameSelectorCard key={game.type} game={game} href={`/set/${studySet.id}/${game.type}`} index={index} />
         ))}
       </div>
+
+      <Modal
+        open={Boolean(pendingDelete)}
+        title="Delete study set"
+        onClose={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
+        confirmLabel="Delete"
+      >
+        <p>
+          Delete <strong>{pendingDelete?.title}</strong>? This removes the deck and all cached game data from localStorage.
+        </p>
+      </Modal>
     </section>
   );
 }

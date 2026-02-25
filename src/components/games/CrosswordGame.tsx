@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import { generateLayout } from 'crossword-layout-generator';
 
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -8,12 +10,42 @@ import type { Term } from '@/types/study-set';
 
 import type { GameComponentProps } from '@/components/games/types';
 
-type Entry = {
+type Orientation = 'across' | 'down';
+
+type SeedEntry = {
+  id: string;
+  answer: string;
+  displayAnswer: string;
+  clue: string;
+};
+
+type GeneratorInput = {
+  clue: string;
+  answer: string;
+};
+
+type GeneratorResultWord = {
+  clue: string;
+  answer: string;
+  startx?: number;
+  starty?: number;
+  position?: number;
+  orientation?: string;
+};
+
+type GeneratorLayout = {
+  rows?: number;
+  cols?: number;
+  result?: GeneratorResultWord[];
+};
+
+type PlacedEntry = {
   id: string;
   number: number;
   answer: string;
   displayAnswer: string;
   clue: string;
+  orientation: Orientation;
   row: number;
   col: number;
 };
@@ -22,182 +54,377 @@ type CellMeta = {
   key: string;
   row: number;
   col: number;
-  entryId: string;
-  indexInEntry: number;
   solution: string;
   number?: number;
+  acrossId?: string;
+  downId?: string;
 };
 
-function cleanLetters(value: string) {
-  return value.replace(/[^a-zA-Z]/g, '').toUpperCase();
+type LayoutModel = {
+  rows: number;
+  cols: number;
+  cellMap: Map<string, CellMeta>;
+  placedEntries: PlacedEntry[];
+};
+
+function shuffle<T>(items: T[]) {
+  const next = [...items];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
 }
 
-function normalizeEntries(data: unknown, fallbackTerms: Term[]): Entry[] {
-  if (data && typeof data === 'object' && 'entries' in data && Array.isArray((data as { entries?: unknown[] }).entries)) {
-    const parsed = (data as { entries: unknown[] }).entries
-      .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-      .map((item, index) => {
-        const rawAnswer = typeof item.answer === 'string' ? item.answer : typeof item.term === 'string' ? item.term : '';
-        return {
-          id: typeof item.id === 'string' ? item.id : `${index + 1}`,
-          number: index + 1,
-          answer: cleanLetters(rawAnswer),
-          displayAnswer: typeof item.displayAnswer === 'string' ? item.displayAnswer : rawAnswer,
-          clue: typeof item.clue === 'string' ? item.clue : typeof item.definition === 'string' ? item.definition : '',
-          row: Math.max(0, index * 2),
-          col: (index * 2) % 5,
-        };
-      })
-      .filter((entry) => entry.answer.length >= 3 && entry.answer.length <= 10 && entry.clue)
-      .slice(0, 8);
+function cellKey(row: number, col: number) {
+  return `${row}-${col}`;
+}
 
-    if (parsed.length) return parsed;
+function cleanLetters(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z]/g, '')
+    .toUpperCase();
+}
+
+function normalizeSeeds(data: unknown, fallbackTerms: Term[]): SeedEntry[] {
+  const fromData = data && typeof data === 'object' && 'entries' in data && Array.isArray((data as { entries?: unknown[] }).entries)
+    ? (data as { entries: unknown[] }).entries
+    : [];
+
+  const raw = fromData.length
+    ? fromData.map((item, index) => {
+        const entry = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
+        const rawAnswer = typeof entry.answer === 'string'
+          ? entry.answer
+          : typeof entry.term === 'string'
+            ? entry.term
+            : '';
+        return {
+          id: typeof entry.id === 'string' ? entry.id : `entry-${index + 1}`,
+          answer: cleanLetters(rawAnswer),
+          displayAnswer: typeof entry.displayAnswer === 'string' ? entry.displayAnswer : rawAnswer,
+          clue: typeof entry.clue === 'string'
+            ? entry.clue
+            : typeof entry.definition === 'string'
+              ? entry.definition
+              : '',
+        } satisfies SeedEntry;
+      })
+    : fallbackTerms.map((term) => ({
+        id: term.id,
+        answer: cleanLetters(term.term),
+        displayAnswer: term.term,
+        clue: term.definition,
+      }));
+
+  const deduped = new Map<string, SeedEntry>();
+  for (const entry of raw) {
+    if (!entry.clue) continue;
+    if (entry.answer.length < 3 || entry.answer.length > 12) continue;
+    const key = `${entry.answer}::${entry.clue}`;
+    if (!deduped.has(key)) deduped.set(key, entry);
   }
 
-  return fallbackTerms
-    .map((term, index) => ({
-      id: term.id,
-      number: index + 1,
-      answer: cleanLetters(term.term),
-      displayAnswer: term.term,
-      clue: term.definition,
-      row: index * 2,
-      col: (index * 2) % 5,
-    }))
-    .filter((entry) => entry.answer.length >= 3 && entry.answer.length <= 10)
-    .slice(0, 8);
+  return Array.from(deduped.values()).slice(0, 12);
 }
 
-export function CrosswordGame({ studySet, data }: GameComponentProps) {
-  const entries = useMemo(() => normalizeEntries(data, studySet.terms), [data, studySet.terms]);
+function buildLayoutFromSeeds(seeds: SeedEntry[]): LayoutModel | null {
+  if (!seeds.length) return null;
 
-  const layout = useMemo(() => {
+  let best: LayoutModel | null = null;
+  const tries = Math.min(6, Math.max(2, seeds.length));
+
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    const ordered = attempt === 0 ? seeds : shuffle(seeds);
+    const input: GeneratorInput[] = ordered.map((seed) => ({ clue: seed.clue, answer: seed.answer.toLowerCase() }));
+    const generated = generateLayout(input) as GeneratorLayout;
+    const result = Array.isArray(generated.result) ? generated.result : [];
+
+    const seedBuckets = new Map<string, SeedEntry[]>();
+    for (const seed of ordered) {
+      const key = `${seed.answer.toLowerCase()}::${seed.clue}`;
+      const bucket = seedBuckets.get(key) ?? [];
+      bucket.push(seed);
+      seedBuckets.set(key, bucket);
+    }
+
+    const placedEntries: PlacedEntry[] = [];
+
+    for (const word of result) {
+      const orientation = word.orientation === 'across' || word.orientation === 'down' ? word.orientation : null;
+      if (!orientation) continue;
+      if (typeof word.startx !== 'number' || typeof word.starty !== 'number' || typeof word.position !== 'number') continue;
+
+      const key = `${cleanLetters(word.answer ?? '').toLowerCase()}::${word.clue ?? ''}`;
+      const bucket = seedBuckets.get(key);
+      const seed = bucket?.shift();
+      if (!seed) continue;
+
+      placedEntries.push({
+        id: seed.id,
+        number: word.position,
+        answer: seed.answer,
+        displayAnswer: seed.displayAnswer,
+        clue: seed.clue,
+        orientation,
+        row: Math.max(0, word.starty - 1),
+        col: Math.max(0, word.startx - 1),
+      });
+    }
+
+    if (!placedEntries.length) continue;
+
     const cellMap = new Map<string, CellMeta>();
-    let maxCol = 0;
     let maxRow = 0;
+    let maxCol = 0;
 
-    entries.forEach((entry) => {
-      entry.answer.split('').forEach((char, indexInEntry) => {
-        const row = entry.row;
-        const col = entry.col + indexInEntry;
-        const key = `${row}-${col}`;
-        cellMap.set(key, {
+    for (const entry of placedEntries) {
+      entry.answer.split('').forEach((letter, index) => {
+        const row = entry.row + (entry.orientation === 'down' ? index : 0);
+        const col = entry.col + (entry.orientation === 'across' ? index : 0);
+        const key = cellKey(row, col);
+        const existing = cellMap.get(key);
+
+        if (existing && existing.solution !== letter) {
+          return;
+        }
+
+        const nextCell: CellMeta = {
           key,
           row,
           col,
-          entryId: entry.id,
-          indexInEntry,
-          solution: char,
-          number: indexInEntry === 0 ? entry.number : undefined,
-        });
-        maxCol = Math.max(maxCol, col);
+          solution: letter,
+          number: index === 0 ? (existing?.number ?? entry.number) : existing?.number,
+          acrossId: entry.orientation === 'across' ? entry.id : existing?.acrossId,
+          downId: entry.orientation === 'down' ? entry.id : existing?.downId,
+        };
+
+        if (entry.orientation === 'across' && existing?.downId) nextCell.downId = existing.downId;
+        if (entry.orientation === 'down' && existing?.acrossId) nextCell.acrossId = existing.acrossId;
+
+        cellMap.set(key, nextCell);
         maxRow = Math.max(maxRow, row);
+        maxCol = Math.max(maxCol, col);
       });
-    });
+    }
 
-    return {
+    const connectedScore = Array.from(cellMap.values()).filter((cell) => cell.acrossId && cell.downId).length;
+    const model: LayoutModel = {
+      rows: Math.max(1, typeof generated.rows === 'number' ? generated.rows : maxRow + 1, maxRow + 1),
+      cols: Math.max(1, typeof generated.cols === 'number' ? generated.cols : maxCol + 1, maxCol + 1),
       cellMap,
-      rows: maxRow + 1,
-      cols: maxCol + 1,
+      placedEntries: placedEntries.sort((a, b) => (a.number - b.number) || a.orientation.localeCompare(b.orientation)),
     };
-  }, [entries]);
 
-  const allCells = useMemo(() => Array.from(layout.cellMap.values()), [layout.cellMap]);
+    if (!best) {
+      best = model;
+      continue;
+    }
+
+    const bestConnected = Array.from(best.cellMap.values()).filter((cell) => cell.acrossId && cell.downId).length;
+    if (
+      model.placedEntries.length > best.placedEntries.length ||
+      (model.placedEntries.length === best.placedEntries.length && connectedScore > bestConnected)
+    ) {
+      best = model;
+    }
+  }
+
+  return best;
+}
+
+function getEntryCellKey(entry: PlacedEntry, index: number) {
+  const row = entry.row + (entry.orientation === 'down' ? index : 0);
+  const col = entry.col + (entry.orientation === 'across' ? index : 0);
+  return cellKey(row, col);
+}
+
+function getCellIndexInEntry(cell: CellMeta, entry: PlacedEntry) {
+  return entry.orientation === 'across' ? cell.col - entry.col : cell.row - entry.row;
+}
+
+function keyToOrientation(key: string): Orientation | null {
+  if (key === 'ArrowLeft' || key === 'ArrowRight') return 'across';
+  if (key === 'ArrowUp' || key === 'ArrowDown') return 'down';
+  return null;
+}
+
+function getArrowDelta(key: string) {
+  if (key === 'ArrowLeft') return { dr: 0, dc: -1 };
+  if (key === 'ArrowRight') return { dr: 0, dc: 1 };
+  if (key === 'ArrowUp') return { dr: -1, dc: 0 };
+  if (key === 'ArrowDown') return { dr: 1, dc: 0 };
+  return null;
+}
+
+export function CrosswordGame({ studySet, data }: GameComponentProps) {
+  const seeds = useMemo(() => normalizeSeeds(data, studySet.terms), [data, studySet.terms]);
+  const layout = useMemo(() => buildLayoutFromSeeds(seeds), [seeds]);
+
   const [values, setValues] = useState<Record<string, string>>({});
-  const [selectedCellKey, setSelectedCellKey] = useState<string | null>(allCells[0]?.key ?? null);
-  const [status, setStatus] = useState('Fill the grid using the clues. Use arrow keys to move between entries.');
+  const [selectedCellKey, setSelectedCellKey] = useState<string | null>(null);
+  const [direction, setDirection] = useState<Orientation>('across');
+  const [status, setStatus] = useState('Fill intersecting clues with your keyboard. Click a clue or square to focus.');
 
   useEffect(() => {
+    if (!layout || !layout.placedEntries.length) {
+      setValues({});
+      setSelectedCellKey(null);
+      setDirection('across');
+      setStatus('No valid crossword layout could be generated from this deck.');
+      return;
+    }
+
+    const firstAcross = layout.placedEntries.find((entry) => entry.orientation === 'across');
+    const firstEntry = firstAcross ?? layout.placedEntries[0];
     setValues({});
-    setSelectedCellKey(allCells[0]?.key ?? null);
-    setStatus('Fill the grid using the clues. Use arrow keys to move between entries.');
-  }, [entries, allCells]);
+    setSelectedCellKey(firstEntry ? getEntryCellKey(firstEntry, 0) : null);
+    setDirection(firstEntry?.orientation ?? 'across');
+    setStatus('Fill intersecting clues with your keyboard. Click a clue or square to focus.');
+  }, [layout]);
 
-  const selectedCell = selectedCellKey ? layout.cellMap.get(selectedCellKey) ?? null : null;
-  const selectedEntry = selectedCell ? entries.find((entry) => entry.id === selectedCell.entryId) ?? null : entries[0] ?? null;
+  const entryById = useMemo(() => {
+    const map = new Map<string, PlacedEntry>();
+    if (!layout) return map;
+    layout.placedEntries.forEach((entry) => map.set(entry.id, entry));
+    return map;
+  }, [layout]);
 
-  const entryProgress = useMemo(() => {
-    return entries.map((entry) => {
-      const cells = entry.answer.split('').map((_, indexInEntry) => layout.cellMap.get(`${entry.row}-${entry.col + indexInEntry}`)).filter(Boolean) as CellMeta[];
-      const filled = cells.filter((cell) => (values[cell.key] ?? '').length === 1).length;
-      const correct = cells.every((cell) => (values[cell.key] ?? '') === cell.solution);
-      return { entry, cells, filled, correct };
+  const selectedCell = selectedCellKey && layout ? layout.cellMap.get(selectedCellKey) ?? null : null;
+  const resolvedDirection: Orientation = selectedCell
+    ? direction === 'across'
+      ? (selectedCell.acrossId ? 'across' : 'down')
+      : (selectedCell.downId ? 'down' : 'across')
+    : direction;
+
+  const selectedEntry = selectedCell
+    ? entryById.get((resolvedDirection === 'across' ? selectedCell.acrossId : selectedCell.downId) ?? '')
+    : layout?.placedEntries[0] ?? null;
+
+  const acrossEntries = useMemo(
+    () => (layout?.placedEntries.filter((entry) => entry.orientation === 'across') ?? []),
+    [layout],
+  );
+  const downEntries = useMemo(
+    () => (layout?.placedEntries.filter((entry) => entry.orientation === 'down') ?? []),
+    [layout],
+  );
+
+  const progressRows = useMemo(() => {
+    if (!layout) return [] as Array<{ entry: PlacedEntry; filled: number; correct: boolean }>;
+    return layout.placedEntries.map((entry) => {
+      const keys = entry.answer.split('').map((_, index) => getEntryCellKey(entry, index));
+      const filled = keys.filter((key) => (values[key] ?? '').length === 1).length;
+      const correct = keys.every((key, index) => (values[key] ?? '') === entry.answer[index]);
+      return { entry, filled, correct };
     });
-  }, [entries, layout.cellMap, values]);
+  }, [layout, values]);
 
-  const solvedCount = entryProgress.filter((row) => row.correct).length;
-  const complete = entries.length > 0 && solvedCount === entries.length;
+  const progressById = useMemo(() => new Map(progressRows.map((row) => [row.entry.id, row])), [progressRows]);
+  const solvedCount = progressRows.filter((row) => row.correct).length;
+  const complete = Boolean(layout?.placedEntries.length) && solvedCount === (layout?.placedEntries.length ?? 0);
+
+  const focusEntry = (entry: PlacedEntry) => {
+    setDirection(entry.orientation);
+    setSelectedCellKey(getEntryCellKey(entry, 0));
+    setStatus(`Focused ${entry.orientation} clue ${entry.number}.`);
+  };
+
+  const moveSelectionByArrow = useCallback((arrowKey: string) => {
+    if (!layout || !selectedCell) return;
+    const delta = getArrowDelta(arrowKey);
+    const nextOrientation = keyToOrientation(arrowKey);
+    if (!delta || !nextOrientation) return;
+
+    const nextRow = selectedCell.row + delta.dr;
+    const nextCol = selectedCell.col + delta.dc;
+    const target = layout.cellMap.get(cellKey(nextRow, nextCol));
+    if (!target) return;
+
+    setSelectedCellKey(target.key);
+    setDirection(target[nextOrientation === 'across' ? 'acrossId' : 'downId'] ? nextOrientation : (target.acrossId ? 'across' : 'down'));
+  }, [layout, selectedCell]);
 
   useEffect(() => {
+    if (!layout) return;
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (!selectedCell) return;
-      const selectedEntryLocal = entries.find((entry) => entry.id === selectedCell.entryId);
-      if (!selectedEntryLocal) return;
 
-      if (event.key === 'ArrowRight') {
-        event.preventDefault();
-        const nextIndex = Math.min(selectedEntryLocal.answer.length - 1, selectedCell.indexInEntry + 1);
-        setSelectedCellKey(`${selectedEntryLocal.row}-${selectedEntryLocal.col + nextIndex}`);
+      if (event.key === 'Tab') return;
+
+      if (event.key === ' ') {
+        if (selectedCell.acrossId && selectedCell.downId) {
+          event.preventDefault();
+          setDirection((prev) => (prev === 'across' ? 'down' : 'across'));
+          setStatus('Switched clue direction.');
+        }
         return;
       }
-      if (event.key === 'ArrowLeft') {
+
+      if (event.key.startsWith('Arrow')) {
         event.preventDefault();
-        const nextIndex = Math.max(0, selectedCell.indexInEntry - 1);
-        setSelectedCellKey(`${selectedEntryLocal.row}-${selectedEntryLocal.col + nextIndex}`);
+        moveSelectionByArrow(event.key);
         return;
       }
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault();
-        const currentEntryIndex = entries.findIndex((entry) => entry.id === selectedEntryLocal.id);
-        if (currentEntryIndex < 0) return;
-        const nextEntryIndex = event.key === 'ArrowDown'
-          ? Math.min(entries.length - 1, currentEntryIndex + 1)
-          : Math.max(0, currentEntryIndex - 1);
-        const nextEntry = entries[nextEntryIndex];
-        const nextPos = Math.min(selectedCell.indexInEntry, nextEntry.answer.length - 1);
-        setSelectedCellKey(`${nextEntry.row}-${nextEntry.col + nextPos}`);
-        return;
-      }
+
+      const activeEntry = selectedEntry;
+      if (!activeEntry) return;
+      const currentIndex = getCellIndexInEntry(selectedCell, activeEntry);
+
       if (event.key === 'Backspace') {
         event.preventDefault();
-        setValues((prev) => ({ ...prev, [selectedCell.key]: '' }));
-        setStatus('Updated current cell.');
-        return;
-      }
-      if (event.key === 'Tab') {
+        const currentVal = values[selectedCell.key] ?? '';
+        if (currentVal) {
+          setValues((prev) => ({ ...prev, [selectedCell.key]: '' }));
+          setStatus('Cleared current cell.');
+          return;
+        }
+
+        const prevIndex = Math.max(0, currentIndex - 1);
+        const prevKey = getEntryCellKey(activeEntry, prevIndex);
+        setSelectedCellKey(prevKey);
+        setValues((prev) => ({ ...prev, [prevKey]: '' }));
+        setStatus('Moved back one cell.');
         return;
       }
 
       const char = event.key.toUpperCase();
-      if (/^[A-Z]$/.test(char)) {
-        event.preventDefault();
-        setValues((prev) => ({ ...prev, [selectedCell.key]: char }));
-        const nextIndex = Math.min(selectedEntryLocal.answer.length - 1, selectedCell.indexInEntry + 1);
-        setSelectedCellKey(`${selectedEntryLocal.row}-${selectedEntryLocal.col + nextIndex}`);
-      }
+      if (!/^[A-Z]$/.test(char)) return;
+
+      event.preventDefault();
+      setValues((prev) => ({ ...prev, [selectedCell.key]: char }));
+      setStatus('Updated current cell.');
+
+      const nextIndex = Math.min(activeEntry.answer.length - 1, currentIndex + 1);
+      const nextKey = getEntryCellKey(activeEntry, nextIndex);
+      setSelectedCellKey(nextKey);
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [entries, selectedCell]);
+  }, [layout, moveSelectionByArrow, selectedCell, selectedEntry, values]);
 
-  const revealEntry = (entry: Entry) => {
+  const revealEntry = (entry: PlacedEntry) => {
     setValues((prev) => {
       const next = { ...prev };
-      entry.answer.split('').forEach((char, indexInEntry) => {
-        next[`${entry.row}-${entry.col + indexInEntry}`] = char;
+      entry.answer.split('').forEach((char, index) => {
+        next[getEntryCellKey(entry, index)] = char;
       });
       return next;
     });
-    setStatus(`Revealed entry ${entry.number}.`);
+    setStatus(`Revealed ${entry.orientation} clue ${entry.number}.`);
   };
 
   const revealAll = () => {
+    if (!layout) return;
     setValues((prev) => {
       const next = { ...prev };
-      entries.forEach((entry) => {
-        entry.answer.split('').forEach((char, indexInEntry) => {
-          next[`${entry.row}-${entry.col + indexInEntry}`] = char;
+      layout.placedEntries.forEach((entry) => {
+        entry.answer.split('').forEach((char, index) => {
+          next[getEntryCellKey(entry, index)] = char;
         });
       });
       return next;
@@ -210,7 +437,7 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
     setStatus('Cleared the grid.');
   };
 
-  if (!entries.length) {
+  if (!layout || !layout.placedEntries.length) {
     return (
       <Card className="rounded-[28px] p-6">
         <p className="text-sm text-[var(--text-muted)]">No crossword entries available.</p>
@@ -218,19 +445,23 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
     );
   }
 
+  const totalCells = layout.rows * layout.cols;
+
   return (
     <div className="space-y-4">
       <Card className="rounded-[28px] p-5 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-xl font-semibold sm:text-2xl">Crossword</h2>
-            <p className="text-sm text-[var(--text-muted)]">Crossword-style clue grid with keyboard navigation. (Across-focused MVP)</p>
+            <p className="text-sm text-[var(--text-muted)]">True intersecting crossword layout with across/down clues. Space toggles direction on intersections.</p>
           </div>
           <div className="flex flex-wrap gap-2 text-sm">
             <span className="rounded-full border px-3 py-2 font-semibold" style={{ borderColor: 'var(--border)' }}>
-              {solvedCount}/{entries.length} solved
+              {solvedCount}/{layout.placedEntries.length} solved
             </span>
-            <span className="rounded-full bg-sky px-3 py-2 font-semibold text-black">{complete ? 'Complete' : 'In Progress'}</span>
+            <span className={`rounded-full px-3 py-2 font-semibold ${complete ? 'bg-olive text-black' : 'bg-sky text-black'}`}>
+              {complete ? 'Complete' : 'In Progress'}
+            </span>
           </div>
         </div>
         <div className="mt-4 rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'var(--border)', background: 'var(--surface-elevated)' }}>
@@ -239,45 +470,84 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
       </Card>
 
       <Card className="rounded-[28px] p-4 sm:p-5">
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)] xl:items-start">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] xl:items-start">
           <div className="overflow-x-auto">
             <div
               className="grid gap-1 rounded-2xl border p-3"
               style={{
-                gridTemplateColumns: `repeat(${Math.max(layout.cols, 8)}, minmax(0, 2.2rem))`,
+                gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 2.35rem))`,
                 borderColor: 'var(--border)',
-                background: 'var(--surface-elevated)',
+                background: 'linear-gradient(135deg, rgba(127,178,255,0.05) 0%, rgba(175,163,255,0.04) 100%)',
                 width: 'fit-content',
                 minWidth: '100%',
               }}
             >
-              {Array.from({ length: Math.max(layout.rows, 1) * Math.max(layout.cols, 8) }).map((_, flatIndex) => {
-                const row = Math.floor(flatIndex / Math.max(layout.cols, 8));
-                const col = flatIndex % Math.max(layout.cols, 8);
-                const key = `${row}-${col}`;
+              {Array.from({ length: totalCells }).map((_, flatIndex) => {
+                const row = Math.floor(flatIndex / layout.cols);
+                const col = flatIndex % layout.cols;
+                const key = cellKey(row, col);
                 const cell = layout.cellMap.get(key);
 
                 if (!cell) {
-                  return <div key={key} className="h-9 w-9 rounded-md" aria-hidden />;
+                  return (
+                    <div
+                      key={key}
+                      className="h-9 w-9 rounded-md border"
+                      style={{
+                        borderColor: 'rgba(0,0,0,0.08)',
+                        background: 'rgba(0,0,0,0.78)',
+                        opacity: 0.88,
+                      }}
+                      aria-hidden
+                    />
+                  );
                 }
 
                 const isSelected = selectedCellKey === cell.key;
-                const isCorrect = (values[cell.key] ?? '') === cell.solution && (values[cell.key] ?? '').length === 1;
+                const inSelectedEntry = Boolean(selectedEntry && ((selectedEntry.orientation === 'across' && cell.acrossId === selectedEntry.id) || (selectedEntry.orientation === 'down' && cell.downId === selectedEntry.id)));
+                const expected = values[cell.key] ?? '';
+                const isCorrectCell = expected.length === 1 && expected === cell.solution;
+                const wrongFilled = expected.length === 1 && expected !== cell.solution;
+
                 return (
                   <button
                     key={key}
                     type="button"
-                    onClick={() => setSelectedCellKey(cell.key)}
+                    onClick={() => {
+                      if (selectedCellKey === cell.key && cell.acrossId && cell.downId) {
+                        setDirection((prev) => (prev === 'across' ? 'down' : 'across'));
+                        return;
+                      }
+                      setSelectedCellKey(cell.key);
+                      setDirection(cell.acrossId ? 'across' : 'down');
+                    }}
                     className="relative h-9 w-9 rounded-md border text-center text-sm font-semibold uppercase transition"
                     style={{
-                      borderColor: isSelected ? 'rgba(243,87,87,0.65)' : isCorrect ? 'rgba(166,190,89,0.55)' : 'var(--border)',
-                      background: isSelected ? 'rgba(243,87,87,0.08)' : isCorrect ? 'rgba(166,190,89,0.08)' : 'var(--surface)',
+                      borderColor: isSelected
+                        ? 'rgba(243,87,87,0.65)'
+                        : wrongFilled
+                          ? 'rgba(243,87,87,0.4)'
+                          : isCorrectCell
+                            ? 'rgba(166,190,89,0.45)'
+                            : inSelectedEntry
+                              ? 'rgba(127,178,255,0.4)'
+                              : 'var(--border)',
+                      background: isSelected
+                        ? 'rgba(243,87,87,0.10)'
+                        : wrongFilled
+                          ? 'rgba(243,87,87,0.08)'
+                          : isCorrectCell
+                            ? 'rgba(166,190,89,0.08)'
+                            : inSelectedEntry
+                              ? 'rgba(127,178,255,0.08)'
+                              : 'var(--surface)',
                     }}
+                    aria-label={`Crossword cell row ${row + 1} column ${col + 1}`}
                   >
                     {typeof cell.number === 'number' ? (
                       <span className="absolute left-1 top-0.5 text-[9px] font-semibold text-[var(--text-muted)]">{cell.number}</span>
                     ) : null}
-                    <span>{values[cell.key] ?? ''}</span>
+                    <span>{expected}</span>
                   </button>
                 );
               })}
@@ -289,8 +559,12 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Selected clue</p>
               {selectedEntry ? (
                 <>
-                  <p className="mt-2 text-sm font-semibold">{selectedEntry.number}. {selectedEntry.clue}</p>
-                  <p className="mt-1 text-xs text-[var(--text-muted)]">{selectedEntry.answer.length} letters</p>
+                  <p className="mt-2 text-sm font-semibold">
+                    {selectedEntry.number}. {selectedEntry.clue}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    {selectedEntry.orientation.toUpperCase()} · {selectedEntry.answer.length} letters
+                  </p>
                 </>
               ) : (
                 <p className="mt-2 text-sm text-[var(--text-muted)]">Select a clue or cell.</p>
@@ -304,33 +578,67 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
               </div>
             </div>
 
-            <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Across Clues</p>
-              <div className="mt-3 space-y-2">
-                {entryProgress.map((row) => {
-                  const isSelected = row.entry.id === selectedEntry?.id;
-                  return (
-                    <button
-                      key={row.entry.id}
-                      type="button"
-                      onClick={() => setSelectedCellKey(`${row.entry.row}-${row.entry.col}`)}
-                      className="w-full rounded-xl border px-3 py-3 text-left text-sm transition"
-                      style={{
-                        borderColor: isSelected ? 'rgba(127,178,255,0.55)' : 'var(--border)',
-                        background: row.correct
-                          ? 'rgba(166,190,89,0.08)'
-                          : isSelected
-                            ? 'rgba(127,178,255,0.08)'
-                            : 'transparent',
-                      }}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold">{row.entry.number}. {row.entry.clue}</span>
-                        <span className="text-xs text-[var(--text-muted)]">{row.filled}/{row.entry.answer.length}</span>
-                      </div>
-                    </button>
-                  );
-                })}
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+              <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Across Clues</p>
+                <div className="mt-3 space-y-2">
+                  {acrossEntries.length ? acrossEntries.map((entry) => {
+                    const progress = progressById.get(entry.id);
+                    const isSelected = selectedEntry?.id === entry.id;
+                    return (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        onClick={() => focusEntry(entry)}
+                        className="w-full rounded-xl border px-3 py-3 text-left text-sm transition"
+                        style={{
+                          borderColor: isSelected ? 'rgba(127,178,255,0.55)' : 'var(--border)',
+                          background: progress?.correct
+                            ? 'rgba(166,190,89,0.08)'
+                            : isSelected
+                              ? 'rgba(127,178,255,0.08)'
+                              : 'transparent',
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold">{entry.number}. {entry.clue}</span>
+                          <span className="text-xs text-[var(--text-muted)]">{progress?.filled ?? 0}/{entry.answer.length}</span>
+                        </div>
+                      </button>
+                    );
+                  }) : <p className="text-sm text-[var(--text-muted)]">No across clues in this layout.</p>}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Down Clues</p>
+                <div className="mt-3 space-y-2">
+                  {downEntries.length ? downEntries.map((entry) => {
+                    const progress = progressById.get(entry.id);
+                    const isSelected = selectedEntry?.id === entry.id;
+                    return (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        onClick={() => focusEntry(entry)}
+                        className="w-full rounded-xl border px-3 py-3 text-left text-sm transition"
+                        style={{
+                          borderColor: isSelected ? 'rgba(175,163,255,0.55)' : 'var(--border)',
+                          background: progress?.correct
+                            ? 'rgba(166,190,89,0.08)'
+                            : isSelected
+                              ? 'rgba(175,163,255,0.08)'
+                              : 'transparent',
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold">{entry.number}. {entry.clue}</span>
+                          <span className="text-xs text-[var(--text-muted)]">{progress?.filled ?? 0}/{entry.answer.length}</span>
+                        </div>
+                      </button>
+                    );
+                  }) : <p className="text-sm text-[var(--text-muted)]">No down clues in this layout.</p>}
+                </div>
               </div>
             </div>
           </div>

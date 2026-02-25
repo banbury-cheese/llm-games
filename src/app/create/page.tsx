@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { v4 as uuidv4 } from 'uuid';
 
 import { TermEditor } from '@/components/create/TermEditor';
@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/Input';
 import { TextArea } from '@/components/ui/TextArea';
 import { extractTextFromPdf } from '@/lib/pdf';
 import { aiSettingsStore, studySetStore } from '@/lib/storage';
+import { DEFAULT_AI_SETTINGS } from '@/types/settings';
 import type { SourceType, StudySet, Term } from '@/types/study-set';
 
 const SOURCE_MODES: Array<{ key: SourceType; label: string; blurb: string }> = [
@@ -31,8 +32,11 @@ interface GenerateTermsResponse {
   error?: unknown;
 }
 
-export default function CreatePage() {
+function CreatePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const editId = searchParams.get('edit');
+  const regenIntent = searchParams.get('regen') === '1';
   const [mode, setMode] = useState<SourceType>('text');
   const [textSource, setTextSource] = useState('');
   const [topicSource, setTopicSource] = useState('');
@@ -42,11 +46,63 @@ export default function CreatePage() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [tutorInstruction, setTutorInstruction] = useState('');
   const [terms, setTerms] = useState<Term[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editSourceSet, setEditSourceSet] = useState<StudySet | null>(null);
+  const [editLookupState, setEditLookupState] = useState<'idle' | 'loading' | 'ready' | 'not-found'>('idle');
+  const [configuredLimits, setConfiguredLimits] = useState(() => ({
+    maxTermsPerDeck: DEFAULT_AI_SETTINGS.maxTermsPerDeck,
+    maxCardsPerGame: DEFAULT_AI_SETTINGS.maxCardsPerGame,
+  }));
+
+  useEffect(() => {
+    const settings = aiSettingsStore.get();
+    setConfiguredLimits({
+      maxTermsPerDeck: settings.maxTermsPerDeck,
+      maxCardsPerGame: settings.maxCardsPerGame,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!editId) {
+      setEditSourceSet(null);
+      setEditLookupState('idle');
+      return;
+    }
+
+    setEditLookupState('loading');
+    const existing = studySetStore.get(editId);
+
+    if (!existing) {
+      setEditSourceSet(null);
+      setEditLookupState('not-found');
+      setError('Study set not found for editing. It may have been deleted from localStorage.');
+      setStatus(null);
+      return;
+    }
+
+    setEditSourceSet(existing);
+    setEditLookupState('ready');
+    setMode(existing.sourceType);
+    setTextSource(existing.sourceType === 'text' ? existing.sourceContent : '');
+    setTopicSource(existing.sourceType === 'topic' ? existing.sourceContent : '');
+    setDocumentText(existing.sourceType === 'document' ? existing.sourceContent : '');
+    setDocumentFileName(existing.sourceType === 'document' ? 'Saved PDF source text' : '');
+    setTitle(existing.title);
+    setDescription(existing.description ?? '');
+    setTutorInstruction(existing.tutorInstruction ?? '');
+    setTerms(existing.terms.map((term) => ({ ...term })));
+    setError(null);
+    setStatus(
+      regenIntent
+        ? `Opened “${existing.title}” in re-generate mode. Review the saved source and click Re-generate Terms to replace the current term list.`
+        : `Loaded “${existing.title}” for editing.`,
+    );
+  }, [editId, regenIntent]);
 
   const activeSourceContent = useMemo(() => {
     if (mode === 'text') return textSource;
@@ -55,6 +111,15 @@ export default function CreatePage() {
   }, [mode, textSource, topicSource, documentText]);
 
   const canGenerate = useMemo(() => activeSourceContent.trim().length > 0, [activeSourceContent]);
+  const isEditing = Boolean(editId && editSourceSet);
+  const showEditNotFound = Boolean(editId) && editLookupState === 'not-found';
+
+  const restoreSavedTerms = () => {
+    if (!editSourceSet) return;
+    setTerms(editSourceSet.terms.map((term) => ({ ...term })));
+    setStatus(`Restored ${editSourceSet.terms.length} saved term${editSourceSet.terms.length === 1 ? '' : 's'} from this deck.`);
+    setError(null);
+  };
 
   const handlePdfFile = async (file: File) => {
     setDocumentLoading(true);
@@ -89,6 +154,7 @@ export default function CreatePage() {
           mode: 'extract-terms',
           inputText: mode === 'text' || mode === 'document' ? activeSourceContent : undefined,
           topic: mode === 'topic' ? topicSource : undefined,
+          tutorInstruction: tutorInstruction.trim() || undefined,
           settings,
         }),
       });
@@ -110,12 +176,14 @@ export default function CreatePage() {
           term: term.term.trim(),
           definition: term.definition.trim(),
         }));
+      const cappedTerms = mappedTerms.slice(0, settings.maxTermsPerDeck);
+      const trimmedCount = Math.max(0, mappedTerms.length - cappedTerms.length);
 
-      setTerms(mappedTerms);
+      setTerms(cappedTerms);
       setTitle(result.title?.trim() || (mode === 'topic' ? topicSource.trim() : 'New Study Set'));
       setDescription(result.description?.trim() || `Generated from ${mode === 'document' ? documentFileName || 'PDF upload' : mode} input.`);
       setStatus(
-        `${result.source === 'fallback' ? 'Fallback generation used.' : 'Terms generated.'} ${mappedTerms.length} term${mappedTerms.length === 1 ? '' : 's'} ready for review.${result.warning ? ` ${result.warning}` : ''}`,
+        `${result.source === 'fallback' ? 'Fallback generation used.' : 'Terms generated.'} ${cappedTerms.length} term${cappedTerms.length === 1 ? '' : 's'} ready for review.${trimmedCount ? ` Trimmed ${trimmedCount} to respect your Settings deck limit (${settings.maxTermsPerDeck}).` : ''}${isEditing ? ' Saving will replace the deck terms and reset cached game data.' : ''}${result.warning ? ` ${result.warning}` : ''}`,
       );
     } catch (generateError) {
       setError(generateError instanceof Error ? generateError.message : 'Unexpected generation error.');
@@ -139,15 +207,56 @@ export default function CreatePage() {
       return;
     }
 
+    const currentSettings = aiSettingsStore.get();
+    if (cleanedTerms.length > currentSettings.maxTermsPerDeck) {
+      setError(
+        `This deck has ${cleanedTerms.length} terms, but your Settings cap is ${currentSettings.maxTermsPerDeck}. Remove some terms or increase the deck limit in Settings.`,
+      );
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
 
     const now = Date.now();
+    const nextTitle = title.trim() || (mode === 'topic' ? topicSource.trim() : 'Untitled Study Set');
+    const nextDescription = description.trim();
+    const nextTutorInstruction = tutorInstruction.trim() || undefined;
+
+    if (editSourceSet) {
+      const normalizedCurrentTerms = cleanedTerms.map((term) => `${term.term}::${term.definition}`);
+      const normalizedOriginalTerms = editSourceSet.terms
+        .map((term) => ({ ...term, term: term.term.trim(), definition: term.definition.trim() }))
+        .filter((term) => term.term && term.definition)
+        .map((term) => `${term.term}::${term.definition}`);
+
+      const termsChanged = JSON.stringify(normalizedCurrentTerms) !== JSON.stringify(normalizedOriginalTerms);
+      const sourceChanged = editSourceSet.sourceType !== mode || editSourceSet.sourceContent !== activeSourceContent;
+      const cacheShouldReset = termsChanged || sourceChanged;
+
+      const updatedSet: StudySet = {
+        ...editSourceSet,
+        title: nextTitle,
+        description: nextDescription,
+        tutorInstruction: nextTutorInstruction,
+        sourceType: mode,
+        sourceContent: activeSourceContent,
+        terms: cleanedTerms,
+        updatedAt: now,
+        gameData: cacheShouldReset ? {} : editSourceSet.gameData,
+      };
+
+      studySetStore.upsert(updatedSet);
+      router.push(`/set/${editSourceSet.id}`);
+      return;
+    }
+
     const id = uuidv4();
     const studySet: StudySet = {
       id,
-      title: title.trim() || (mode === 'topic' ? topicSource.trim() : 'Untitled Study Set'),
-      description: description.trim(),
+      title: nextTitle,
+      description: nextDescription,
+      tutorInstruction: nextTutorInstruction,
       sourceType: mode,
       sourceContent: activeSourceContent,
       terms: cleanedTerms,
@@ -160,19 +269,42 @@ export default function CreatePage() {
     router.push(`/set/${id}`);
   };
 
+  if (Boolean(editId) && editLookupState === 'loading') {
+    return (
+      <section className="mx-auto max-w-6xl space-y-5">
+        <Card className="rounded-[28px] p-6">
+          <p className="text-sm text-[var(--text-muted)]">Loading study set for editing…</p>
+        </Card>
+      </section>
+    );
+  }
+
   return (
     <section className="mx-auto max-w-6xl space-y-5">
       <div className="space-y-2">
         <p className="inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]" style={{ borderColor: 'var(--border)' }}>
-          Create Study Set
+          {isEditing ? 'Edit Study Set' : 'Create Study Set'}
         </p>
         <h1 className="text-3xl font-semibold leading-tight sm:text-4xl lg:text-5xl">
-          Feed content in, get game-ready terms out.
+          {isEditing ? 'Refine source, terms, and tutor focus.' : 'Feed content in, get game-ready terms out.'}
         </h1>
         <p className="max-w-3xl text-sm leading-6 text-[var(--text-muted)] sm:text-base">
-          Use text paste, PDF upload, or a topic prompt. Term extraction calls the configured LLM and falls back to local extraction when unavailable.
+          {isEditing
+            ? 'Update deck metadata, tweak terms, or re-generate from the saved source. Changing terms/source resets cached game data for this deck.'
+            : 'Use text paste, PDF upload, or a topic prompt. Term extraction calls the configured LLM and falls back to local extraction when unavailable.'}
         </p>
       </div>
+
+      {showEditNotFound ? (
+        <Card className="rounded-[24px] p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-[var(--text-muted)]">This study set no longer exists locally.</p>
+            <Button type="button" variant="secondary" onClick={() => router.push('/')}>
+              Back to Dashboard
+            </Button>
+          </div>
+        </Card>
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
         <Card className="rounded-[28px] p-5 sm:p-6">
@@ -224,11 +356,16 @@ export default function CreatePage() {
             ) : null}
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Button type="button" onClick={generateTerms} loading={isGenerating} disabled={!canGenerate || documentLoading}>
-                Generate Terms
+              <Button type="button" onClick={generateTerms} loading={isGenerating} disabled={!canGenerate || documentLoading || showEditNotFound}>
+                {isEditing ? 'Re-generate Terms' : 'Generate Terms'}
               </Button>
+              {isEditing ? (
+                <Button type="button" variant="ghost" onClick={restoreSavedTerms} disabled={!editSourceSet || isGenerating}>
+                  Reset to Saved Terms
+                </Button>
+              ) : null}
               <span className="text-xs leading-5 text-[var(--text-muted)]">
-                Uses your provider settings from the Settings page.
+                {isEditing ? 'Re-generation replaces the current editable term list.' : 'Uses your provider settings from the Settings page.'}
               </span>
             </div>
 
@@ -272,6 +409,21 @@ export default function CreatePage() {
                   className="min-h-[120px]"
                 />
               </div>
+              <div>
+                <label htmlFor="tutor-instruction" className="mb-2 block text-sm font-semibold">
+                  Tutor Focus (Optional)
+                </label>
+                <TextArea
+                  id="tutor-instruction"
+                  value={tutorInstruction}
+                  onChange={(event) => setTutorInstruction(event.target.value)}
+                  placeholder="What exactly do you want to learn from this source? Example: Focus on understanding evaluation metrics and when to use each one."
+                  className="min-h-[120px]"
+                />
+                <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+                  Used to focus term extraction and guide the AI Tutor for this deck.
+                </p>
+              </div>
             </div>
             <div className="rounded-2xl border p-4 text-sm leading-6" style={{ borderColor: 'var(--border)' }}>
               <p className="font-semibold">Current source mode</p>
@@ -283,6 +435,9 @@ export default function CreatePage() {
               <p className="mt-3 text-xs text-[var(--text-muted)]">
                 Saving stores source text, term list, and future game data caches in browser localStorage.
               </p>
+              <p className="mt-2 text-xs text-[var(--text-muted)]">
+                Current caps from Settings: {configuredLimits.maxTermsPerDeck} terms per deck, {configuredLimits.maxCardsPerGame} cards/items per game.
+              </p>
             </div>
           </div>
         </Card>
@@ -293,22 +448,47 @@ export default function CreatePage() {
       <Card className="rounded-[28px] p-5 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold sm:text-xl">Save and open game selector</h2>
+            <h2 className="text-lg font-semibold sm:text-xl">{isEditing ? 'Update deck and return to games' : 'Save and open game selector'}</h2>
             <p className="text-sm text-[var(--text-muted)]">
-              The set is stored locally and the game grid will generate/caches data on first play.
+              {isEditing
+                ? 'Updates are stored locally. If terms/source changed, cached game data is reset and rebuilt on next play.'
+                : 'The set is stored locally and the game grid will generate/caches data on first play.'}
             </p>
           </div>
-          <Button
-            type="button"
-            size="lg"
-            onClick={saveStudySet}
-            loading={isSaving}
-            disabled={!terms.length}
-          >
-            Save Study Set
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {isEditing ? (
+              <Button type="button" variant="secondary" onClick={() => router.push(editSourceSet ? `/set/${editSourceSet.id}` : '/')}>
+                Cancel
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="lg"
+              onClick={saveStudySet}
+              loading={isSaving}
+              disabled={!terms.length || showEditNotFound}
+            >
+              {isEditing ? 'Update Study Set' : 'Save Study Set'}
+            </Button>
+          </div>
         </div>
       </Card>
     </section>
+  );
+}
+
+export default function CreatePage() {
+  return (
+    <Suspense
+      fallback={(
+        <section className="mx-auto max-w-6xl space-y-5">
+          <Card className="rounded-[28px] p-6">
+            <p className="text-sm text-[var(--text-muted)]">Loading create flow…</p>
+          </Card>
+        </section>
+      )}
+    >
+      <CreatePageContent />
+    </Suspense>
   );
 }

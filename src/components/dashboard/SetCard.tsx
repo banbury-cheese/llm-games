@@ -67,13 +67,21 @@ export function SetCard({ studySet, onDelete, index }: SetCardProps) {
 
           <div className="mt-auto flex flex-wrap items-center gap-2 text-xs font-semibold">
             <span className="rounded-full bg-black/10 px-3 py-1">{studySet.terms.length} terms</span>
-            <span className="rounded-full bg-black/10 px-3 py-1">{formatDate(studySet.createdAt)}</span>
+            <span className="rounded-full bg-black/10 px-3 py-1">
+              {studySet.updatedAt && studySet.updatedAt > studySet.createdAt ? `Updated ${formatDate(studySet.updatedAt)}` : formatDate(studySet.createdAt)}
+            </span>
           </div>
         </Link>
 
         <div className="flex items-center justify-between gap-3 border-t border-black/10 p-4">
           <p className="text-xs font-semibold opacity-80">Open game grid</p>
           <div className="flex items-center gap-2">
+            <Link
+              href={`/create?edit=${studySet.id}`}
+              className="inline-flex items-center justify-center rounded-full border border-black/20 bg-black/5 px-3 py-2 text-xs font-semibold transition hover:bg-black/10"
+            >
+              Edit
+            </Link>
             <Button
               type="button"
               size="sm"

@@ -32,9 +32,10 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
     attachContext({
       sessionKey,
       setTitle: studySet.title,
+      tutorInstruction: studySet.tutorInstruction,
       terms: studySet.terms,
     });
-  }, [attachContext, sessionKey, studySet.title, studySet.terms]);
+  }, [attachContext, sessionKey, studySet.title, studySet.tutorInstruction, studySet.terms]);
 
   useEffect(() => {
     const container = listRef.current;
@@ -62,6 +63,11 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
             <p className="text-sm leading-6 text-[var(--text-muted)]">
               Streaming tutor chat grounded in this study set’s terms and definitions.
             </p>
+            {studySet.tutorInstruction ? (
+              <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+                Focus: {studySet.tutorInstruction}
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -71,6 +77,7 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
                 openTutor({
                   sessionKey,
                   setTitle: studySet.title,
+                  tutorInstruction: studySet.tutorInstruction,
                   terms: studySet.terms,
                 })
               }

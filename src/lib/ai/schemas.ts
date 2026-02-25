@@ -48,6 +48,7 @@ export const genericGameDataSchema = z.object({
 
 export const chatRequestSchema = z.object({
   setTitle: z.string().min(1).max(120).optional(),
+  tutorInstruction: z.string().min(1).max(1200).optional(),
   terms: z.array(termSchema).min(0).max(60),
   messages: z
     .array(
@@ -68,12 +69,15 @@ export const generateRouteSchema = z.object({
   mode: z.enum(['extract-terms', 'game-data']),
   inputText: z.string().min(1).optional(),
   topic: z.string().min(1).optional(),
+  tutorInstruction: z.string().min(1).max(1200).optional(),
   gameType: z.nativeEnum(GameType).optional(),
   terms: z.array(termSchema).optional(),
   settings: z.object({
     provider: z.enum(['openai', 'anthropic', 'google']),
     model: z.string().min(1),
     apiKey: z.string(),
+    maxTermsPerDeck: z.number().int().min(1).max(500).optional(),
+    maxCardsPerGame: z.number().int().min(1).max(500).optional(),
   }),
 });
 

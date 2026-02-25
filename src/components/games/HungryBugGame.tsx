@@ -20,6 +20,7 @@ type ChoiceQuestion = {
 type Point = { x: number; y: number };
 type Direction = 'up' | 'down' | 'left' | 'right';
 type EventKind = 'correct' | 'wrong' | 'crash' | 'complete';
+type SpeedPreset = 'slow' | 'normal' | 'fast';
 
 type FoodToken = {
   id: string;
@@ -57,6 +58,11 @@ const OPTION_COLOR_SWATCHES = [
   'rgba(166,190,89,0.16)',
   'rgba(175,163,255,0.16)',
 ];
+const SPEED_PRESETS: Record<SpeedPreset, { label: string; multiplier: number }> = {
+  slow: { label: 'Slow', multiplier: 1.45 },
+  normal: { label: 'Normal', multiplier: 1.2 },
+  fast: { label: 'Fast', multiplier: 0.9 },
+};
 
 const DIRECTION_STEPS: Record<Direction, Point> = {
   up: { x: 0, y: -1 },
@@ -204,6 +210,7 @@ function labelForKey(key: string) {
 export function HungryBugGame({ studySet, data }: GameComponentProps) {
   const questions = useMemo(() => cleanQuestionData(data, studySet.terms), [data, studySet.terms]);
   const [state, setState] = useState<HungryBugState>(() => createInitialState(questions.length, questions));
+  const [speedPreset, setSpeedPreset] = useState<SpeedPreset>('normal');
   const [running, setRunning] = useState(false);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [elapsedBaseMs, setElapsedBaseMs] = useState(0);
@@ -245,7 +252,8 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
   useEffect(() => {
     if (!running || state.gameOver || state.completed || !questions.length) return;
 
-    const stepMs = Math.max(90, 180 - Math.min(state.score * 5, 75));
+    const baseStepMs = Math.max(90, 180 - Math.min(state.score * 5, 75));
+    const stepMs = Math.round(baseStepMs * SPEED_PRESETS[speedPreset].multiplier);
 
     const interval = window.setInterval(() => {
       setState((prev) => {
@@ -340,7 +348,7 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
     }, stepMs);
 
     return () => window.clearInterval(interval);
-  }, [questions, running, state.score, state.gameOver, state.completed]);
+  }, [questions, running, speedPreset, state.score, state.gameOver, state.completed]);
 
   useEffect(() => {
     if (!state.eventKind) return;
@@ -447,6 +455,9 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
               Wrong snacks {state.wrongEats}
             </span>
             <span className="rounded-full bg-lavender px-3 py-2 font-semibold text-black">{formatElapsed(elapsedMs)}</span>
+            <span className="rounded-full border px-3 py-2 font-semibold" style={{ borderColor: 'rgba(175,163,255,0.35)' }}>
+              Speed {SPEED_PRESETS[speedPreset].label}
+            </span>
           </div>
         </div>
         <div className="mt-4 h-2 rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }}>
@@ -459,7 +470,29 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
               <p className="font-semibold">Board</p>
-              <p className="text-[var(--text-muted)]">Arrow keys to move · wall/self collision ends run</p>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <span className="text-[var(--text-muted)]">Arrow keys to move · wall/self collision ends run</span>
+                <div className="inline-flex rounded-full border p-1" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
+                  {(Object.keys(SPEED_PRESETS) as SpeedPreset[]).map((preset) => {
+                    const active = speedPreset === preset;
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setSpeedPreset(preset)}
+                        className="rounded-full px-3 py-1 text-xs font-semibold transition"
+                        style={{
+                          background: active ? 'rgba(175,163,255,0.18)' : 'transparent',
+                          color: 'var(--text)',
+                        }}
+                        aria-pressed={active}
+                      >
+                        {SPEED_PRESETS[preset].label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
             <div
@@ -478,6 +511,9 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
                   <div className="max-w-md rounded-2xl border p-4 sm:p-5" style={{ borderColor: 'var(--border)', background: 'rgba(20,20,20,0.35)' }}>
                     <p className="text-sm leading-6 text-[var(--text-muted)]">
                       A question and three answers appear on the right. Use your keyboard arrows to move the bug and eat the matching food.
+                    </p>
+                    <p className="mt-2 text-xs text-[var(--text-muted)]">
+                      Current speed: {SPEED_PRESETS[speedPreset].label} (you can change it anytime).
                     </p>
                     <Button type="button" className="mt-4" onClick={resumeGame}>
                       Start using keyboard
@@ -566,6 +602,26 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
                 <Button type="button" onClick={resumeGame} disabled={state.gameOver || state.completed}>Resume</Button>
               )}
               <Button type="button" variant="ghost" onClick={restartGame}>Restart</Button>
+              <div className="inline-flex rounded-full border p-1" style={{ borderColor: 'var(--border)', background: 'var(--surface-elevated)' }}>
+                {(Object.keys(SPEED_PRESETS) as SpeedPreset[]).map((preset) => {
+                  const active = speedPreset === preset;
+                  return (
+                    <button
+                      key={`bottom-${preset}`}
+                      type="button"
+                      onClick={() => setSpeedPreset(preset)}
+                      className="rounded-full px-3 py-1 text-xs font-semibold transition"
+                      style={{
+                        background: active ? 'rgba(127,178,255,0.16)' : 'transparent',
+                        color: 'var(--text)',
+                      }}
+                      aria-pressed={active}
+                    >
+                      {SPEED_PRESETS[preset].label}
+                    </button>
+                  );
+                })}
+              </div>
               <span className="text-xs text-[var(--text-muted)]">Moves {state.moves} · Snake length {state.snake.length}</span>
             </div>
           </div>

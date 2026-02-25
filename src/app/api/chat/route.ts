@@ -14,8 +14,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { terms, setTitle, messages, settings } = parsed.data;
-    const system = buildChatSystemPrompt({ setTitle, terms });
+    const { terms, setTitle, tutorInstruction, messages, settings } = parsed.data;
+    const system = buildChatSystemPrompt({ setTitle, terms, tutorInstruction });
 
     const result = streamText({
       model: getLanguageModel(settings),

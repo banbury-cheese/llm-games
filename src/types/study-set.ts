@@ -10,6 +10,7 @@ export interface StudySet {
   id: string;
   title: string;
   description: string;
+  tutorInstruction?: string;
   sourceType: SourceType;
   sourceContent: string;
   terms: Term[];
