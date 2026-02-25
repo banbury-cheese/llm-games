@@ -1,10 +1,15 @@
+import { BugMatchGame } from '@/components/games/BugMatchGame';
+import { ChoppedGame } from '@/components/games/ChoppedGame';
 import { ComingSoonGame } from '@/components/games/ComingSoonGame';
+import { CrosswordGame } from '@/components/games/CrosswordGame';
 import { ChatBotGame } from '@/components/games/ChatBotGame';
 import { FlashcardsGame } from '@/components/games/FlashcardsGame';
+import { HungryBugGame } from '@/components/games/HungryBugGame';
 import { MatchingGame } from '@/components/games/MatchingGame';
 import { QuizGame } from '@/components/games/QuizGame';
 import { SnowmanGame } from '@/components/games/SnowmanGame';
 import { StudyTableGame } from '@/components/games/StudyTableGame';
+import { TestModeGame } from '@/components/games/TestModeGame';
 import { TypeInGame } from '@/components/games/TypeInGame';
 import { UnscrambleGame } from '@/components/games/UnscrambleGame';
 import type { GameComponentProps } from '@/components/games/types';
@@ -28,6 +33,16 @@ export function getGameComponent(gameType: GameType) {
       return UnscrambleGame;
     case GameType.Snowman:
       return SnowmanGame;
+    case GameType.HungryBug:
+      return HungryBugGame;
+    case GameType.BugMatch:
+      return BugMatchGame;
+    case GameType.Chopped:
+      return ChoppedGame;
+    case GameType.Crossword:
+      return CrosswordGame;
+    case GameType.Test:
+      return TestModeGame;
     default:
       return ComingSoonGame;
   }

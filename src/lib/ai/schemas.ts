@@ -82,6 +82,7 @@ export const gameSchemaByType = {
   [GameType.Matching]: matchingGameSchema,
   [GameType.Quiz]: quizGameSchema,
   [GameType.TypeIn]: genericGameDataSchema,
+  [GameType.HungryBug]: genericGameDataSchema,
   [GameType.Crossword]: genericGameDataSchema,
   [GameType.Test]: genericGameDataSchema,
   [GameType.Snowman]: genericGameDataSchema,

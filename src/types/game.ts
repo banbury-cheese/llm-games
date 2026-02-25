@@ -3,6 +3,7 @@ export enum GameType {
   Matching = 'matching',
   Quiz = 'quiz',
   TypeIn = 'type-in',
+  HungryBug = 'hungry-bug',
   Crossword = 'crossword',
   Test = 'test',
   Snowman = 'snowman',
@@ -18,6 +19,7 @@ export const GAME_LABELS: Record<GameType, string> = {
   [GameType.Matching]: 'Matching',
   [GameType.Quiz]: 'Quiz',
   [GameType.TypeIn]: 'Type In',
+  [GameType.HungryBug]: 'Hungry Bug',
   [GameType.Crossword]: 'Crossword',
   [GameType.Test]: 'Test Mode',
   [GameType.Snowman]: 'Snowman',
@@ -33,6 +35,7 @@ export const GAME_ICONS: Record<GameType, string> = {
   [GameType.Matching]: '🔗',
   [GameType.Quiz]: '❓',
   [GameType.TypeIn]: '⌨️',
+  [GameType.HungryBug]: '🐛',
   [GameType.Crossword]: '🧩',
   [GameType.Test]: '📝',
   [GameType.Snowman]: '☃️',
@@ -52,6 +55,7 @@ export const GAME_ORDER: GameType[] = [
   GameType.ChatBot,
   GameType.Unscramble,
   GameType.Snowman,
+  GameType.HungryBug,
   GameType.BugMatch,
   GameType.Chopped,
   GameType.Crossword,
@@ -67,6 +71,11 @@ export const IMPLEMENTED_GAMES = new Set<GameType>([
   GameType.ChatBot,
   GameType.Unscramble,
   GameType.Snowman,
+  GameType.HungryBug,
+  GameType.BugMatch,
+  GameType.Chopped,
+  GameType.Crossword,
+  GameType.Test,
 ]);
 
 // Backward-compatible alias used by existing files before Phase 6.
