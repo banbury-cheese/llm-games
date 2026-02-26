@@ -13,6 +13,11 @@ function shuffle<T>(items: T[]) {
   return next;
 }
 
+function sampleUpTo<T>(items: T[], maxItems: number) {
+  if (items.length <= maxItems) return [...items];
+  return shuffle(items).slice(0, maxItems);
+}
+
 function getGenerationLimits() {
   const settings = aiSettingsStore.get();
   return {
@@ -32,7 +37,7 @@ function capGameDataCollections(data: unknown, maxItems: number) {
     const value = record[key];
     if (!Array.isArray(value)) continue;
     if (value.length <= maxItems) continue;
-    next[key] = value.slice(0, maxItems);
+    next[key] = sampleUpTo(value, maxItems);
     changed = true;
   }
 
@@ -296,8 +301,8 @@ function buildLocalQuiz(terms: Term[]) {
 }
 
 export function buildLocalGameData(gameType: GameType, studySet: StudySet) {
-  const { maxTermsPerDeck, maxCardsPerGame } = getGenerationLimits();
-  const limitedTerms = studySet.terms.slice(0, maxTermsPerDeck);
+  const { maxTermsPerDeck } = getGenerationLimits();
+  const limitedTerms = sampleUpTo(studySet.terms, maxTermsPerDeck);
 
   const localData = (() => {
   switch (gameType) {
@@ -337,7 +342,9 @@ export function buildLocalGameData(gameType: GameType, studySet: StudySet) {
   }
   })();
 
-  return capGameDataCollections(localData, maxCardsPerGame);
+  // Keep the cached local payload uncapped so per-start sampling can happen at read-time.
+  // The caller is responsible for applying the per-game cap before returning data to the UI.
+  return localData;
 }
 
 export async function generateAndCacheGameData(
@@ -367,20 +374,19 @@ export async function generateAndCacheGameData(
   ) {
     const localData = buildLocalGameData(gameType, studySet);
     studySetStore.updateGameData(studySet.id, gameType, localData);
-    return { data: localData, source: 'local' as const };
+    return { data: capGameDataCollections(localData, limits.maxCardsPerGame), source: 'local' as const };
   }
 
   if (gameType === GameType.Quiz) {
     const settings = aiSettingsStore.get();
+    const sampledTerms = sampleUpTo(studySet.terms, limits.maxTermsPerDeck);
     const response = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         mode: 'game-data',
         gameType,
-        terms: studySet.terms
-          .slice(0, limits.maxTermsPerDeck)
-          .map((term) => ({ term: term.term, definition: term.definition })),
+        terms: sampledTerms.map((term) => ({ term: term.term, definition: term.definition })),
         settings,
       }),
     });
@@ -391,16 +397,15 @@ export async function generateAndCacheGameData(
       const localData = buildLocalGameData(gameType, studySet);
       studySetStore.updateGameData(studySet.id, gameType, localData);
       return {
-        data: localData,
+        data: capGameDataCollections(localData, limits.maxCardsPerGame),
         source: 'local' as const,
         warning: typeof payload.error === 'string' ? payload.error : 'Quiz generation failed. Using local fallback.',
       };
     }
 
-    const cappedData = capGameDataCollections(payload.data, limits.maxCardsPerGame);
-    studySetStore.updateGameData(studySet.id, gameType, cappedData);
+    studySetStore.updateGameData(studySet.id, gameType, payload.data);
     return {
-      data: cappedData,
+      data: capGameDataCollections(payload.data, limits.maxCardsPerGame),
       source: (payload.source as 'llm' | 'fallback' | undefined) ?? 'llm',
       warning: payload.warning,
     };
@@ -408,5 +413,5 @@ export async function generateAndCacheGameData(
 
   const localData = buildLocalGameData(gameType, studySet);
   studySetStore.updateGameData(studySet.id, gameType, localData);
-  return { data: localData, source: 'local' as const };
+  return { data: capGameDataCollections(localData, limits.maxCardsPerGame), source: 'local' as const };
 }

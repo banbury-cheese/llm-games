@@ -28,9 +28,22 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <ChatTutorProvider>
             <div className="app-shell">
               <Nav />
-              <PageTransition>
-                <main className="page-shell">{children}</main>
-              </PageTransition>
+              <div className="flex-1">
+                <PageTransition>
+                  <main className="page-shell">{children}</main>
+                </PageTransition>
+              </div>
+              <footer className="pb-2 pt-1 text-center text-xs text-[var(--text-muted)]">
+                Built by{' '}
+                <a
+                  href="https://itskay.co/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold underline decoration-current/40 underline-offset-2 transition hover:text-[var(--text)]"
+                >
+                  itskay.co
+                </a>
+              </footer>
             </div>
           </ChatTutorProvider>
         </ThemeProvider>
