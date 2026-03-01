@@ -21,6 +21,10 @@
   background: linear-gradient(135deg, #afa3ff 0%, #7fb2ff 100%);
 }
 
+.logoIcon {
+  @apply h-5 w-5;
+}
+
 .links {
   @apply flex flex-wrap items-center gap-2;
 }

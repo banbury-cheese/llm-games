@@ -30,22 +30,6 @@ export const GAME_LABELS: Record<GameType, string> = {
   [GameType.ChatBot]: 'Chat Bot',
 };
 
-export const GAME_ICONS: Record<GameType, string> = {
-  [GameType.Flashcards]: '🃏',
-  [GameType.Matching]: '🔗',
-  [GameType.Quiz]: '❓',
-  [GameType.TypeIn]: '⌨️',
-  [GameType.HungryBug]: '🐛',
-  [GameType.Crossword]: '🧩',
-  [GameType.Test]: '📝',
-  [GameType.Snowman]: '☃️',
-  [GameType.Unscramble]: '🔠',
-  [GameType.BugMatch]: '🐞',
-  [GameType.StudyTable]: '📚',
-  [GameType.Chopped]: '⏱️',
-  [GameType.ChatBot]: '💬',
-};
-
 export const GAME_ORDER: GameType[] = [
   GameType.StudyTable,
   GameType.Flashcards,
@@ -84,13 +68,11 @@ export const PHASE5_AVAILABLE_GAMES = IMPLEMENTED_GAMES;
 export interface GameDescriptor {
   type: GameType;
   label: string;
-  icon: string;
   available: boolean;
 }
 
 export const GAME_CATALOG: GameDescriptor[] = GAME_ORDER.map((type) => ({
   type,
   label: GAME_LABELS[type],
-  icon: GAME_ICONS[type],
   available: IMPLEMENTED_GAMES.has(type),
 }));

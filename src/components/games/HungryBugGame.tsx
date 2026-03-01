@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { CaterpillarIcon, SnackIcon } from '@/components/ui/BrandIcons';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { initGSAP } from '@/lib/gsap';
@@ -26,7 +27,7 @@ type FoodToken = {
   id: string;
   optionIndex: number;
   label: string;
-  icon: string;
+  iconIndex: number;
   pos: Point;
 };
 
@@ -51,7 +52,7 @@ type HungryBugState = {
 const BOARD_COLS = 15;
 const BOARD_ROWS = 15;
 const INITIAL_LENGTH = 3;
-const FOOD_ICONS = ['🍇', '🍩', '🍒', '🥝', '🍊', '🫐', '🍓', '🥨'];
+const FOOD_VARIANTS = [0, 1, 2, 3, 4, 5, 6, 7];
 const OPTION_COLOR_SWATCHES = [
   'rgba(243,87,87,0.16)',
   'rgba(127,178,255,0.16)',
@@ -161,7 +162,7 @@ function buildFoods(question: ChoiceQuestion | undefined, snake: Point[]) {
     id: `${question.id}-${optionIndex}-${positions[optionIndex]?.x ?? 0}-${positions[optionIndex]?.y ?? 0}`,
     optionIndex,
     label,
-    icon: FOOD_ICONS[(optionIndex + Math.abs(question.id.length)) % FOOD_ICONS.length],
+    iconIndex: FOOD_VARIANTS[(optionIndex + Math.abs(question.id.length)) % FOOD_VARIANTS.length],
     pos: positions[optionIndex] ?? { x: optionIndex, y: optionIndex },
   }));
 }
@@ -565,7 +566,7 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
                   }}
                   title={`Choice ${food.optionIndex + 1}`}
                 >
-                  <span aria-hidden>{food.icon}</span>
+                  <SnackIcon variant={food.iconIndex} className="h-5 w-5" />
                 </div>
               ))}
 
@@ -589,7 +590,11 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
                       boxShadow: isHead ? '0 4px 12px rgba(0,0,0,0.16)' : 'none',
                     }}
                   >
-                    {isHead ? <span className="grid h-full place-items-center text-[0.9rem]">🐛</span> : null}
+                    {isHead ? (
+                      <span className="grid h-full place-items-center">
+                        <CaterpillarIcon className="h-5 w-5" />
+                      </span>
+                    ) : null}
                   </div>
                 );
               })}
@@ -651,7 +656,7 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
                   >
                     <div className="flex items-start gap-3">
                       <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-sm" style={{ borderColor: 'rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.08)' }}>
-                        {FOOD_ICONS[(optionIndex + 1) % FOOD_ICONS.length]}
+                        <SnackIcon variant={FOOD_VARIANTS[(optionIndex + 1) % FOOD_VARIANTS.length]} className="h-4 w-4" />
                       </span>
                       <div className="min-w-0">
                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Choice {optionIndex + 1}</p>

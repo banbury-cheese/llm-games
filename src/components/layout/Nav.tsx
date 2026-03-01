@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { BrandArcadeMarkIcon } from '@/components/ui/BrandIcons';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { cn } from '@/lib/cn';
 
@@ -22,7 +23,7 @@ export function Nav() {
       <div className={styles.row}>
         <Link href="/" className={styles.brand}>
           <span className={styles.logo} aria-hidden>
-            🎮
+            <BrandArcadeMarkIcon className={styles.logoIcon} />
           </span>
           <span>Study Arcade</span>
         </Link>

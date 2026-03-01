@@ -11,6 +11,7 @@ import {
 } from 'react';
 
 import { MarkdownMessage } from '@/components/chat/MarkdownMessage';
+import { TutorSparkIcon } from '@/components/ui/BrandIcons';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { TextArea } from '@/components/ui/TextArea';
@@ -548,7 +549,7 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
         aria-label="Open AI tutor chat"
       >
         <span className="inline-flex items-center gap-2">
-          <span aria-hidden>✨</span>
+          <TutorSparkIcon className="h-4 w-4" />
           <span>AI Tutor</span>
         </span>
       </button>

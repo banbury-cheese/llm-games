@@ -20,3 +20,11 @@
   @apply flex w-full items-center justify-between px-2 text-xs font-semibold;
   color: var(--text-muted);
 }
+
+.trackIcon {
+  @apply h-4 w-4;
+}
+
+.thumbIcon {
+  @apply h-5 w-5;
+}

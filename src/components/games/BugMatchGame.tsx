@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { AntIcon, LadybugIcon } from '@/components/ui/BrandIcons';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { initGSAP } from '@/lib/gsap';
@@ -24,7 +25,7 @@ type EventKind = 'correct' | 'wrong' | 'complete' | 'crash';
 type AntToken = {
   id: string;
   optionIndex: number;
-  icon: string;
+  iconIndex: number;
   pos: Point;
 };
 
@@ -47,7 +48,7 @@ type BugMatchState = {
 const BOARD_COLS = 12;
 const BOARD_ROWS = 9;
 const START_LIVES = 3;
-const ANT_ICONS = ['🐜', '🪲', '🐞', '🦗'];
+const ANT_VARIANTS = [0, 1, 2, 3];
 const OPTION_BG = [
   'rgba(243,87,87,0.12)',
   'rgba(127,178,255,0.12)',
@@ -144,7 +145,7 @@ function buildAnts(question: ChoiceQuestion | undefined, player: Point): AntToke
   return question.options.map((_, optionIndex) => ({
     id: `${question.id}-${optionIndex}-${points[optionIndex]?.x ?? 0}-${points[optionIndex]?.y ?? 0}`,
     optionIndex,
-    icon: ANT_ICONS[optionIndex % ANT_ICONS.length],
+    iconIndex: ANT_VARIANTS[optionIndex % ANT_VARIANTS.length],
     pos: points[optionIndex] ?? { x: optionIndex, y: optionIndex },
   }));
 }
@@ -453,7 +454,11 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
             <span className="rounded-full border px-3 py-2 font-semibold" style={{ borderColor: 'rgba(243,87,87,0.35)' }}>
               Lives {' '}
               <span aria-label={`${state.lives} lives`}>
-                {Array.from({ length: START_LIVES }, (_, i) => (i < state.lives ? '🐞' : '·')).join(' ')}
+                <span className="inline-flex items-center gap-1 align-middle">
+                  {Array.from({ length: START_LIVES }, (_, i) => (
+                    <LadybugIcon key={`life-${i}`} active={i < state.lives} className="h-4 w-4" />
+                  ))}
+                </span>
               </span>
             </span>
           </div>
@@ -537,7 +542,7 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
                     background: OPTION_BG[ant.optionIndex % OPTION_BG.length],
                   }}
                 >
-                  <span aria-hidden>{ant.icon}</span>
+                  <AntIcon variant={ant.iconIndex} className="h-5 w-5" />
                 </div>
               ))}
 
@@ -555,7 +560,7 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
                 }}
                 aria-label="Your bug"
               >
-                🐞
+                <LadybugIcon className="h-6 w-6" />
               </div>
             </div>
 
@@ -600,7 +605,7 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
                   >
                     <div className="flex items-start gap-3">
                       <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-sm" style={{ borderColor: 'rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.06)' }}>
-                        {ANT_ICONS[optionIndex % ANT_ICONS.length]}
+                        <AntIcon variant={ANT_VARIANTS[optionIndex % ANT_VARIANTS.length]} className="h-4 w-4" />
                       </span>
                       <div className="min-w-0">
                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Ant {optionIndex + 1}</p>

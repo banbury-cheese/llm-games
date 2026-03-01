@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { Card } from '@/components/ui/Card';
+import { GameTypeIcon } from '@/components/ui/BrandIcons';
 import type { GameDescriptor } from '@/types/game';
 
 interface GameSelectorCardProps {
@@ -23,7 +24,7 @@ export function GameSelectorCard({ game, href, index }: GameSelectorCardProps) {
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-2">
             <div className="text-2xl" aria-hidden>
-              {game.icon}
+              <GameTypeIcon type={game.type} className="h-8 w-8" />
             </div>
             <h3 className="text-base font-semibold sm:text-lg">{game.label}</h3>
             <p className="text-xs leading-5 text-[var(--text-muted)]">Coming in a later phase</p>
@@ -46,7 +47,7 @@ export function GameSelectorCard({ game, href, index }: GameSelectorCardProps) {
         <div className="flex h-full flex-col justify-between gap-6">
           <div className="flex items-start justify-between gap-3">
             <div className="text-2xl sm:text-3xl" aria-hidden>
-              {game.icon}
+              <GameTypeIcon type={game.type} className="h-8 w-8 sm:h-10 sm:w-10" />
             </div>
             <span className="rounded-full bg-black/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]">
               Ready

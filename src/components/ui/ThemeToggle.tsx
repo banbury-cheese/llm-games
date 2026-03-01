@@ -1,5 +1,6 @@
 'use client';
 
+import { ThemeMoonIcon, ThemeSunIcon } from '@/components/ui/BrandIcons';
 import { useTheme } from '@/lib/theme';
 import { cn } from '@/lib/cn';
 
@@ -17,11 +18,15 @@ export function ThemeToggle() {
       title={mounted ? `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme` : 'Toggle theme'}
     >
       <span className={styles.icons} aria-hidden>
-        <span>☀️</span>
-        <span>🌙</span>
+        <ThemeSunIcon className={styles.trackIcon} />
+        <ThemeMoonIcon className={styles.trackIcon} />
       </span>
       <span className={styles.thumb} aria-hidden>
-        {theme === 'dark' ? '🌙' : '☀️'}
+        {theme === 'dark' ? (
+          <ThemeMoonIcon className={styles.thumbIcon} />
+        ) : (
+          <ThemeSunIcon className={styles.thumbIcon} />
+        )}
       </span>
     </button>
   );
