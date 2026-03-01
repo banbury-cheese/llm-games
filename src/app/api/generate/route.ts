@@ -1,5 +1,6 @@
-import { generateObject } from 'ai';
+import { generateObject, generateText } from 'ai';
 import { NextResponse } from 'next/server';
+import type { z } from 'zod';
 
 import { buildGamePrompt, buildTermExtractionPrompt } from '@/lib/ai/prompts';
 import { getLanguageModel } from '@/lib/ai/providers';
@@ -29,6 +30,62 @@ function resolveMaxTermsPerDeck(settings: { maxTermsPerDeck?: number }) {
     STUDY_LIMITS.maxTermsPerDeck.max,
     Math.max(STUDY_LIMITS.maxTermsPerDeck.min, Math.round(raw)),
   );
+}
+
+function parseJsonFromModelText(text: string): unknown {
+  const fencedMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fencedMatch?.[1] ?? text).trim();
+
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    // Try to recover from extra prose by extracting the first JSON object block.
+    const start = candidate.indexOf('{');
+    const end = candidate.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      return JSON.parse(candidate.slice(start, end + 1));
+    }
+    throw new Error('Model response did not contain valid JSON.');
+  }
+}
+
+function formatZodIssue(error: z.ZodError) {
+  const first = error.issues[0];
+  if (!first) return 'Generated JSON did not match expected schema.';
+  const path = first.path.length ? first.path.join('.') : 'root';
+  return `${path}: ${first.message}`;
+}
+
+async function generateObjectCompat<T extends z.ZodTypeAny>(input: {
+  provider: 'openai' | 'anthropic' | 'google';
+  model: ReturnType<typeof getLanguageModel>;
+  schema: T;
+  system: string;
+  prompt: string;
+  anthropicJsonShape: string;
+}) {
+  if (input.provider !== 'anthropic') {
+    const result = await generateObject({
+      model: input.model,
+      schema: input.schema,
+      system: input.system,
+      prompt: input.prompt,
+    });
+    return result.object as z.infer<T>;
+  }
+
+  const { text } = await generateText({
+    model: input.model,
+    system: input.system,
+    prompt: `${input.prompt}\n\nReturn ONLY valid JSON. Do not include markdown fences or commentary.\nJSON shape:\n${input.anthropicJsonShape}`,
+  });
+
+  const raw = parseJsonFromModelText(text);
+  const parsed = input.schema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(formatZodIssue(parsed.error));
+  }
+  return parsed.data;
 }
 
 function localFallbackGameData(gameType: GameType, terms: Array<{ term: string; definition: string }>) {
@@ -80,18 +137,22 @@ export async function POST(request: Request) {
         topic: parsed.data.topic,
         tutorInstruction: parsed.data.tutorInstruction,
       });
+      const model = getLanguageModel(settings);
 
       try {
-        const result = await generateObject({
-          model: getLanguageModel(settings),
+        const result = await generateObjectCompat({
+          provider: settings.provider,
+          model,
           schema: termExtractionSchema,
           system: promptData.system,
           prompt: promptData.prompt,
+          anthropicJsonShape:
+            '{"title":"string","description":"string","terms":[{"term":"string","definition":"string"}]}',
         });
 
         return NextResponse.json({
-          ...result.object,
-          terms: dedupeTerms(result.object.terms).slice(0, maxTermsPerDeck),
+          ...result,
+          terms: dedupeTerms(result.terms).slice(0, maxTermsPerDeck),
           source: 'llm',
         });
       } catch (error) {
@@ -140,16 +201,24 @@ export async function POST(request: Request) {
     const terms = parsed.data.terms;
     const schema = gameSchemaByType[gameType];
     const promptData = buildGamePrompt(gameType, terms);
+    const model = getLanguageModel(settings);
 
     try {
-      const result = await generateObject({
-        model: getLanguageModel(settings),
+      const result = await generateObjectCompat({
+        provider: settings.provider,
+        model,
         schema,
         system: promptData.system,
         prompt: promptData.prompt,
+        anthropicJsonShape:
+          gameType === GameType.Quiz
+            ? '{"title":"string","questions":[{"id":"string","prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}]}'
+            : gameType === GameType.Matching
+              ? '{"instructions":"string","pairs":[{"id":"string","term":"string","definition":"string"}]}'
+              : '{"items":[],"note":"string"}',
       });
 
-      return NextResponse.json({ gameType, data: result.object, source: 'llm' });
+      return NextResponse.json({ gameType, data: result, source: 'llm' });
     } catch (error) {
       return NextResponse.json({
         gameType,
