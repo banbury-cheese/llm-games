@@ -5,6 +5,7 @@ import { getAnalyticsHeaders, trackServerApiRequest } from '@/lib/analytics/serv
 export const runtime = 'nodejs';
 
 let pdfRuntimeReadyPromise: Promise<void> | null = null;
+let pdfWorkerReadyPromise: Promise<void> | null = null;
 
 async function ensurePdfRuntimePolyfills() {
   if (pdfRuntimeReadyPromise) {
@@ -45,7 +46,20 @@ async function ensurePdfRuntimePolyfills() {
 
 async function extractTextWithPdfJs(buffer: ArrayBuffer) {
   await ensurePdfRuntimePolyfills();
+  if (!pdfWorkerReadyPromise) {
+    pdfWorkerReadyPromise = import('pdfjs-dist/legacy/build/pdf.worker.mjs')
+      .then(() => undefined)
+      .catch((error) => {
+        console.warn('[pdf-extract] Failed to preload pdf.worker.mjs:', error);
+      });
+  }
+  await pdfWorkerReadyPromise;
+
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const globalWorkerOptions = pdfjs.GlobalWorkerOptions as { workerSrc?: string };
+  if (!globalWorkerOptions.workerSrc || globalWorkerOptions.workerSrc === './pdf.worker.mjs') {
+    globalWorkerOptions.workerSrc = 'pdfjs-dist/legacy/build/pdf.worker.mjs';
+  }
   const bytes = new Uint8Array(buffer);
 
   const loadingTask = pdfjs.getDocument({
