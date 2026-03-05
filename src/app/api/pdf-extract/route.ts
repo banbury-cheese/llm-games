@@ -4,7 +4,47 @@ import { getAnalyticsHeaders, trackServerApiRequest } from '@/lib/analytics/serv
 
 export const runtime = 'nodejs';
 
+let pdfRuntimeReadyPromise: Promise<void> | null = null;
+
+async function ensurePdfRuntimePolyfills() {
+  if (pdfRuntimeReadyPromise) {
+    return pdfRuntimeReadyPromise;
+  }
+
+  pdfRuntimeReadyPromise = (async () => {
+    const globals = globalThis as {
+      DOMMatrix?: unknown;
+      ImageData?: unknown;
+      Path2D?: unknown;
+      [key: string]: unknown;
+    };
+
+    if (globals.DOMMatrix && globals.ImageData && globals.Path2D) {
+      return;
+    }
+
+    try {
+      const canvas = await import('@napi-rs/canvas');
+
+      if (!globals.DOMMatrix && canvas.DOMMatrix) {
+        globals.DOMMatrix = canvas.DOMMatrix;
+      }
+      if (!globals.ImageData && canvas.ImageData) {
+        globals.ImageData = canvas.ImageData;
+      }
+      if (!globals.Path2D && canvas.Path2D) {
+        globals.Path2D = canvas.Path2D;
+      }
+    } catch (error) {
+      console.warn('[pdf-extract] Failed to load @napi-rs/canvas polyfills:', error);
+    }
+  })();
+
+  return pdfRuntimeReadyPromise;
+}
+
 async function extractTextWithPdfJs(buffer: ArrayBuffer) {
+  await ensurePdfRuntimePolyfills();
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const bytes = new Uint8Array(buffer);
 

@@ -13,6 +13,7 @@
     "@ai-sdk/anthropic": "^3.0.46",
     "@ai-sdk/google": "^3.0.30",
     "@ai-sdk/openai": "^3.0.30",
+    "@napi-rs/canvas": "^0.1.96",
     "ai": "^6.0.97",
     "crossword-layout-generator": "^0.1.1",
     "gsap": "^3.14.2",
