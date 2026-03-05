@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { getAnalyticsHeaders, trackServerApiRequest } from '@/lib/analytics/server';
+
 export const runtime = 'nodejs';
 
 const execFileAsync = promisify(execFile);
@@ -38,24 +40,80 @@ async function extractTextWithNodeScript(buffer: ArrayBuffer) {
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
+  const analytics = getAnalyticsHeaders(request);
   try {
     const formData = await request.formData();
     const fileValue = formData.get('file');
 
     if (!(fileValue instanceof Blob)) {
+      await trackServerApiRequest({
+        clientId: analytics.clientId,
+        consent: analytics.consent,
+        apiRoute: '/api/pdf-extract',
+        result: 'error',
+        statusCode: 400,
+        durationMs: Date.now() - startedAt,
+        errorCode: 'missing_file',
+      });
       return NextResponse.json({ error: 'No PDF file received.' }, { status: 400 });
     }
 
     const buffer = await fileValue.arrayBuffer();
     if (!buffer.byteLength) {
+      await trackServerApiRequest({
+        clientId: analytics.clientId,
+        consent: analytics.consent,
+        apiRoute: '/api/pdf-extract',
+        result: 'error',
+        statusCode: 400,
+        durationMs: Date.now() - startedAt,
+        errorCode: 'empty_file',
+      });
       return NextResponse.json({ error: 'Uploaded PDF is empty.' }, { status: 400 });
     }
 
+    await trackServerApiRequest({
+      clientId: analytics.clientId,
+      consent: analytics.consent,
+      apiRoute: '/api/pdf-extract',
+      result: 'start',
+      extra: {
+        file_size_bucket:
+          buffer.byteLength < 300_000
+            ? 'lt_300kb'
+            : buffer.byteLength < 1_000_000
+              ? '300kb_1mb'
+              : buffer.byteLength < 5_000_000
+                ? '1mb_5mb'
+                : 'gte_5mb',
+      },
+    });
+
     const text = await extractTextWithNodeScript(buffer);
-    return NextResponse.json({ text });
+    const response = NextResponse.json({ text });
+    await trackServerApiRequest({
+      clientId: analytics.clientId,
+      consent: analytics.consent,
+      apiRoute: '/api/pdf-extract',
+      result: 'success',
+      statusCode: response.status,
+      durationMs: Date.now() - startedAt,
+    });
+    return response;
   } catch (error) {
     console.error('[pdf-extract] error', error);
     const message = error instanceof Error ? error.message : 'Failed to extract PDF text.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    const response = NextResponse.json({ error: message }, { status: 500 });
+    await trackServerApiRequest({
+      clientId: analytics.clientId,
+      consent: analytics.consent,
+      apiRoute: '/api/pdf-extract',
+      result: 'error',
+      statusCode: response.status,
+      durationMs: Date.now() - startedAt,
+      errorCode: error instanceof Error ? error.name : 'unexpected_error',
+    });
+    return response;
   }
 }

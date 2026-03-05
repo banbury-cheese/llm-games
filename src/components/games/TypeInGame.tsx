@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -84,6 +85,7 @@ function scoreLabel(score: number) {
 }
 
 export function TypeInGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const items = useMemo(() => normalizeItems(data, studySet.terms), [data, studySet.terms]);
   const [index, setIndex] = useState(0);
   const [inputValue, setInputValue] = useState('');
@@ -92,6 +94,7 @@ export function TypeInGame({ studySet, data }: GameComponentProps) {
 
   const cardRef = useRef<HTMLDivElement>(null);
   const feedbackRef = useRef<HTMLDivElement>(null);
+  const completionTrackedRef = useRef(false);
   const currentItem = items[index];
   const currentItemId = currentItem?.id ?? null;
 
@@ -123,6 +126,22 @@ export function TypeInGame({ studySet, data }: GameComponentProps) {
     setInputValue(previous?.answer ?? '');
     setSubmittedScore(previous?.score ?? null);
   }, [currentItem, attempts]);
+
+  useEffect(() => {
+    if (!completed || completionTrackedRef.current) return;
+    completionTrackedRef.current = true;
+    trackEvent('typein_complete', {
+      set_id: studySet.id,
+      score: averageScore,
+      total_count: items.length,
+    });
+    trackEvent('game_session_complete', {
+      set_id: studySet.id,
+      game_type: 'type-in',
+      score: averageScore,
+      result: 'complete',
+    });
+  }, [completed, averageScore, items.length, studySet.id, trackEvent]);
 
   if (!items.length) {
     return (
@@ -157,7 +176,17 @@ export function TypeInGame({ studySet, data }: GameComponentProps) {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={() => { setAttempts({}); setIndex(0); setInputValue(''); setSubmittedScore(null); }}>
+            <Button
+              type="button"
+              onClick={() => {
+                trackEvent('typein_restart', { set_id: studySet.id });
+                setAttempts({});
+                setIndex(0);
+                setInputValue('');
+                setSubmittedScore(null);
+                completionTrackedRef.current = false;
+              }}
+            >
               Restart Type In
             </Button>
           </div>
@@ -180,9 +209,18 @@ export function TypeInGame({ studySet, data }: GameComponentProps) {
       },
     }));
     setSubmittedScore(score);
+    trackEvent('typein_submit', {
+      set_id: studySet.id,
+      score: Math.round(score * 100),
+      score_bucket: score >= 0.95 ? 'high' : score >= 0.75 ? 'medium' : 'low',
+    });
   };
 
   const goNext = () => {
+    trackEvent('typein_next', {
+      set_id: studySet.id,
+      index,
+    });
     if (index >= items.length - 1) {
       setIndex(items.length);
       return;

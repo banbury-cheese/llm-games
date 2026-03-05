@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { AntIcon, LadybugIcon } from '@/components/ui/BrandIcons';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -220,6 +221,7 @@ function moveAntsAroundBoard(ants: AntToken[], player: Point) {
 }
 
 export function BugMatchGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const questions = useMemo(() => normalizeQuestions(data, studySet.terms), [data, studySet.terms]);
   const [state, setState] = useState<BugMatchState>(() => createInitialState(questions.length, questions));
   const [running, setRunning] = useState(false);
@@ -231,6 +233,8 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
   const playerRef = useRef<HTMLDivElement>(null);
   const panelInnerRef = useRef<HTMLDivElement>(null);
   const antRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const completionTrackedRef = useRef(false);
+  const previousLivesRef = useRef(START_LIVES);
 
   useEffect(() => {
     setState(createInitialState(questions.length, questions));
@@ -238,6 +242,8 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
     setElapsedBaseMs(0);
     setRunStartedAt(null);
     setClockNow(Date.now());
+    completionTrackedRef.current = false;
+    previousLivesRef.current = START_LIVES;
   }, [questions]);
 
   const currentQuestion = questions[state.order[state.questionIndex]];
@@ -314,6 +320,31 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
   useEffect(() => {
     if (!state.eventKind) return;
     const gsap = initGSAP();
+    if (state.eventKind === 'correct' || state.eventKind === 'wrong') {
+      trackEvent('bugmatch_ant_hit', {
+        set_id: studySet.id,
+        result: state.eventKind,
+        score: state.score,
+        lives: state.lives,
+      });
+    }
+    if (state.eventKind === 'complete' || state.eventKind === 'crash') {
+      trackEvent('bugmatch_run_end', {
+        set_id: studySet.id,
+        result: state.eventKind === 'complete' ? 'complete' : 'crash',
+        score: state.score,
+        lives: state.lives,
+      });
+      if (state.eventKind === 'complete' && !completionTrackedRef.current) {
+        completionTrackedRef.current = true;
+        trackEvent('game_session_complete', {
+          set_id: studySet.id,
+          game_type: 'bug-match',
+          result: 'complete',
+          score: state.score,
+        });
+      }
+    }
     if (playerRef.current) {
       gsap.fromTo(playerRef.current, { scale: 1 }, { scale: state.eventKind === 'correct' ? 1.18 : 0.92, yoyo: true, repeat: 1, duration: 0.12, ease: 'power1.out' });
     }
@@ -327,13 +358,27 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
     if (panelInnerRef.current) {
       gsap.fromTo(panelInnerRef.current, { y: 4, autoAlpha: 0.92 }, { y: 0, autoAlpha: 1, duration: 0.18, ease: 'power2.out' });
     }
-  }, [state.eventKind, state.eventNonce]);
+  }, [state.eventKind, state.eventNonce, state.lives, state.score, studySet.id, trackEvent]);
+
+  useEffect(() => {
+    if (state.lives === previousLivesRef.current) return;
+    trackEvent('bugmatch_life_change', {
+      set_id: studySet.id,
+      lives: state.lives,
+      result: state.lives < previousLivesRef.current ? 'lost' : 'gain',
+    });
+    previousLivesRef.current = state.lives;
+  }, [state.lives, studySet.id, trackEvent]);
 
   const startRun = () => {
     if (state.gameOver || state.completed || !questions.length) return;
     if (running) return;
     setRunStartedAt(Date.now());
     setRunning(true);
+    trackEvent('bugmatch_run_start_pause_restart', {
+      set_id: studySet.id,
+      action: elapsedBaseMs > 0 ? 'resume' : 'start',
+    });
   };
 
   const pauseRun = () => {
@@ -343,6 +388,10 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
     setRunStartedAt(null);
     setClockNow(now);
     setRunning(false);
+    trackEvent('bugmatch_run_start_pause_restart', {
+      set_id: studySet.id,
+      action: 'pause',
+    });
   };
 
   const restartRun = () => {
@@ -351,9 +400,19 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
     setElapsedBaseMs(0);
     setRunStartedAt(null);
     setClockNow(Date.now());
+    completionTrackedRef.current = false;
+    previousLivesRef.current = START_LIVES;
+    trackEvent('bugmatch_run_start_pause_restart', {
+      set_id: studySet.id,
+      action: 'restart',
+    });
   };
 
   const stepPlayer = useCallback((direction: Direction) => {
+    trackEvent('bugmatch_move', {
+      set_id: studySet.id,
+      direction,
+    });
     setState((prev) => {
       if (prev.gameOver || prev.completed) return prev;
       const activeQuestion = questions[prev.order[prev.questionIndex]];
@@ -409,7 +468,7 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
         eventKind: outOfLives ? 'crash' : completed ? 'complete' : correct ? 'correct' : 'wrong',
       };
     });
-  }, [questions]);
+  }, [questions, studySet.id, trackEvent]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -420,6 +479,10 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
       if (!running && !state.gameOver && !state.completed) {
         setRunStartedAt(Date.now());
         setRunning(true);
+        trackEvent('bugmatch_run_start_pause_restart', {
+          set_id: studySet.id,
+          action: elapsedBaseMs > 0 ? 'resume' : 'start',
+        });
       }
 
       stepPlayer(direction);
@@ -427,7 +490,7 @@ export function BugMatchGame({ studySet, data }: GameComponentProps) {
 
     window.addEventListener('keydown', onKeyDown, { passive: false });
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [running, state.gameOver, state.completed, questions, stepPlayer]);
+  }, [running, state.gameOver, state.completed, questions, stepPlayer, elapsedBaseMs, studySet.id, trackEvent]);
 
   if (!questions.length) {
     return (

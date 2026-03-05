@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { MarkdownMessage } from '@/components/chat/MarkdownMessage';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -13,6 +14,7 @@ import { useChatTutor } from '@/lib/chat-tutor';
 import type { GameComponentProps } from '@/components/games/types';
 
 export function ChatBotGame({ studySet }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const {
     getSession,
     getStarterPrompts,
@@ -51,7 +53,15 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
   }, [session.messages.length]);
 
   const submit = async (rawText?: string) => {
+    trackEvent('chatbot_send', {
+      set_id: studySet.id,
+      mode: rawText ? 'starter_prompt' : 'manual_send',
+    });
     await sendMessage(rawText, { sessionKey });
+    trackEvent('chatbot_response', {
+      set_id: studySet.id,
+      result: 'received',
+    });
   };
 
   return (
@@ -73,18 +83,26 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
             <Button
               type="button"
               variant="ghost"
-              onClick={() =>
+              onClick={() => {
+                trackEvent('chatbot_open_popup', { set_id: studySet.id });
                 openTutor({
                   sessionKey,
                   setTitle: studySet.title,
                   tutorInstruction: studySet.tutorInstruction,
                   terms: studySet.terms,
-                })
-              }
+                });
+              }}
             >
               Open Popup Tutor
             </Button>
-            <Button type="button" variant="secondary" onClick={() => resetConversation({ sessionKey })}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                trackEvent('chatbot_reset', { set_id: studySet.id });
+                resetConversation({ sessionKey });
+              }}
+            >
               Reset Chat
             </Button>
           </div>
@@ -97,7 +115,10 @@ export function ChatBotGame({ studySet }: GameComponentProps) {
             <button
               key={prompt}
               type="button"
-              onClick={() => void submit(prompt)}
+              onClick={() => {
+                trackEvent('chatbot_prompt_click', { set_id: studySet.id });
+                void submit(prompt);
+              }}
               disabled={session.loading}
               className="rounded-full border px-3 py-2 text-xs font-semibold transition hover:opacity-90 disabled:opacity-60"
               style={{ borderColor: 'var(--border)', background: 'var(--surface-elevated)' }}

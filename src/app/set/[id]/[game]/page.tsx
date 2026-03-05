@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { getGameComponent, isGameAvailableInCurrentBuild, isValidGameType } from '@/components/games/registry';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -14,6 +15,7 @@ import { GAME_LABELS, type GameType } from '@/types/game';
 import type { StudySet } from '@/types/study-set';
 
 export default function GamePage() {
+  const { trackEvent } = useAnalytics();
   const params = useParams<{ id: string; game: string }>();
   const router = useRouter();
 
@@ -24,6 +26,7 @@ export default function GamePage() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const loadTokenRef = useRef(0);
+  const sessionStartMsRef = useRef<number | null>(null);
 
   const loadGame = useCallback(async (opts?: { force?: boolean }) => {
     const token = ++loadTokenRef.current;
@@ -63,10 +66,20 @@ export default function GamePage() {
     if (!isGameAvailableInCurrentBuild(rawGame)) {
       setGameData({});
       setLoading(false);
+      trackEvent('game_data_load_result', {
+        set_id: setId,
+        game_type: rawGame,
+        result: 'unavailable',
+      });
       return;
     }
 
     try {
+      trackEvent('game_data_load_start', {
+        set_id: setId,
+        game_type: rawGame,
+        mode: opts?.force ? 'regenerate' : 'load',
+      });
       const result = await generateAndCacheGameData(currentSet, rawGame, { force: opts?.force });
       if (token !== loadTokenRef.current) return;
       setGameData(result.data);
@@ -81,14 +94,26 @@ export default function GamePage() {
         setStatus((prev) => `${prev ?? ''} ${result.warning}`.trim());
       }
       setStudySet(studySetStore.get(setId));
+      trackEvent('game_data_load_result', {
+        set_id: setId,
+        game_type: rawGame,
+        source: result.source,
+        has_warning: Boolean(result.warning),
+        result: 'success',
+      });
     } catch (generationError) {
       if (token !== loadTokenRef.current) return;
       setError(generationError instanceof Error ? generationError.message : 'Failed to load game data.');
+      trackEvent('game_data_load_result', {
+        set_id: setId,
+        game_type: rawGame,
+        result: 'error',
+      });
     } finally {
       if (token !== loadTokenRef.current) return;
       setLoading(false);
     }
-  }, [params?.game, params?.id]);
+  }, [params?.game, params?.id, trackEvent]);
 
   useEffect(() => {
     void loadGame();
@@ -97,6 +122,31 @@ export default function GamePage() {
       loadTokenRef.current += 1;
     };
   }, [loadGame]);
+
+  const activeSetId = studySet?.id;
+
+  useEffect(() => {
+    if (loading || error || !activeSetId || !gameType) return;
+    const startedAt = Date.now();
+    sessionStartMsRef.current = startedAt;
+    trackEvent('game_session_start', {
+      set_id: activeSetId,
+      game_type: gameType,
+      mode: 'session',
+    });
+
+    return () => {
+      const duration = sessionStartMsRef.current ? Date.now() - sessionStartMsRef.current : undefined;
+      trackEvent('game_session_exit', {
+        set_id: activeSetId,
+        game_type: gameType,
+        elapsed_ms: duration,
+        duration_ms: duration,
+        result: 'exit',
+      });
+      sessionStartMsRef.current = null;
+    };
+  }, [loading, error, activeSetId, gameType, trackEvent]);
 
   const title = useMemo(() => (gameType ? GAME_LABELS[gameType] : 'Game'), [gameType]);
 
@@ -161,7 +211,18 @@ export default function GamePage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {isGameAvailableInCurrentBuild(gameType) ? (
-              <Button type="button" variant="ghost" onClick={() => void loadGame({ force: true })}>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  trackEvent('set_cache_action', {
+                    action: 'regenerate_game_data',
+                    set_id: studySet.id,
+                    game_type: gameType,
+                  });
+                  void loadGame({ force: true });
+                }}
+              >
                 Re-generate Data
               </Button>
             ) : null}

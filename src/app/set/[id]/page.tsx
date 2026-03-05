@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { GameSelectorCard } from '@/components/games/GameSelectorCard';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -14,6 +15,7 @@ import { GAME_CATALOG } from '@/types/game';
 import type { StudySet } from '@/types/study-set';
 
 export default function SetPage() {
+  const { trackEvent } = useAnalytics();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const [studySet, setStudySet] = useState<StudySet | null>(null);
@@ -59,10 +61,20 @@ export default function SetPage() {
     const updated = studySetStore.clearGameData(studySet.id);
     if (!updated) return;
     setStudySet(updated);
+    trackEvent('set_cache_action', {
+      action: 'clear_game_cache',
+      set_id: studySet.id,
+      result: 'success',
+    });
   };
 
   const confirmDelete = () => {
     if (!pendingDelete) return;
+    trackEvent('set_cache_action', {
+      action: 'delete_set',
+      set_id: pendingDelete.id,
+      result: 'success',
+    });
     studySetStore.delete(pendingDelete.id);
     setPendingDelete(null);
     router.push('/');
@@ -131,7 +143,17 @@ export default function SetPage() {
             <span className="rounded-full bg-lavender px-3 py-2 font-semibold text-black">
               {stats.cachedGames} cached
             </span>
-            <Button type="button" variant="ghost" onClick={() => router.push(`/create?edit=${studySet.id}&regen=1`)}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                trackEvent('set_cache_action', {
+                  action: 'regenerate_terms_intent',
+                  set_id: studySet.id,
+                });
+                router.push(`/create?edit=${studySet.id}&regen=1`);
+              }}
+            >
               Re-generate Terms
             </Button>
             <Button type="button" variant="secondary" onClick={() => router.push(`/create?edit=${studySet.id}`)}>
@@ -152,7 +174,7 @@ export default function SetPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {GAME_CATALOG.map((game, index) => (
-          <GameSelectorCard key={game.type} game={game} href={`/set/${studySet.id}/${game.type}`} index={index} />
+          <GameSelectorCard key={game.type} game={game} href={`/set/${studySet.id}/${game.type}`} index={index} setId={studySet.id} />
         ))}
       </div>
 

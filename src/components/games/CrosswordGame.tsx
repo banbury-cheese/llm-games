@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { generateLayout } from 'crossword-layout-generator';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import type { Term } from '@/types/study-set';
@@ -260,6 +261,7 @@ function getArrowDelta(key: string) {
 }
 
 export function CrosswordGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const seeds = useMemo(() => normalizeSeeds(data, studySet.terms), [data, studySet.terms]);
   const layout = useMemo(() => buildLayoutFromSeeds(seeds), [seeds]);
 
@@ -267,6 +269,7 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
   const [selectedCellKey, setSelectedCellKey] = useState<string | null>(null);
   const [direction, setDirection] = useState<Orientation>('across');
   const [status, setStatus] = useState('Fill intersecting clues with your keyboard. Click a clue or square to focus.');
+  const [completionTracked, setCompletionTracked] = useState(false);
 
   useEffect(() => {
     if (!layout || !layout.placedEntries.length) {
@@ -283,6 +286,7 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
     setSelectedCellKey(firstEntry ? getEntryCellKey(firstEntry, 0) : null);
     setDirection(firstEntry?.orientation ?? 'across');
     setStatus('Fill intersecting clues with your keyboard. Click a clue or square to focus.');
+    setCompletionTracked(false);
   }, [layout]);
 
   const entryById = useMemo(() => {
@@ -326,10 +330,31 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
   const solvedCount = progressRows.filter((row) => row.correct).length;
   const complete = Boolean(layout?.placedEntries.length) && solvedCount === (layout?.placedEntries.length ?? 0);
 
+  useEffect(() => {
+    if (!complete || completionTracked) return;
+    setCompletionTracked(true);
+    trackEvent('crossword_complete', {
+      set_id: studySet.id,
+      score: solvedCount,
+      total_count: layout?.placedEntries.length ?? 0,
+    });
+    trackEvent('game_session_complete', {
+      set_id: studySet.id,
+      game_type: 'crossword',
+      result: 'complete',
+      score: solvedCount,
+    });
+  }, [complete, completionTracked, layout?.placedEntries.length, solvedCount, studySet.id, trackEvent]);
+
   const focusEntry = (entry: PlacedEntry) => {
     setDirection(entry.orientation);
     setSelectedCellKey(getEntryCellKey(entry, 0));
     setStatus(`Focused ${entry.orientation} clue ${entry.number}.`);
+    trackEvent('crossword_clue_focus', {
+      set_id: studySet.id,
+      direction: entry.orientation,
+      index: entry.number,
+    });
   };
 
   const moveSelectionByArrow = useCallback((arrowKey: string) => {
@@ -360,6 +385,9 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
           event.preventDefault();
           setDirection((prev) => (prev === 'across' ? 'down' : 'across'));
           setStatus('Switched clue direction.');
+          trackEvent('crossword_direction_toggle', {
+            set_id: studySet.id,
+          });
         }
         return;
       }
@@ -380,6 +408,10 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
         if (currentVal) {
           setValues((prev) => ({ ...prev, [selectedCell.key]: '' }));
           setStatus('Cleared current cell.');
+          trackEvent('crossword_cell_input', {
+            set_id: studySet.id,
+            result: 'clear',
+          });
           return;
         }
 
@@ -388,6 +420,10 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
         setSelectedCellKey(prevKey);
         setValues((prev) => ({ ...prev, [prevKey]: '' }));
         setStatus('Moved back one cell.');
+        trackEvent('crossword_cell_input', {
+          set_id: studySet.id,
+          result: 'backspace',
+        });
         return;
       }
 
@@ -397,6 +433,10 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
       event.preventDefault();
       setValues((prev) => ({ ...prev, [selectedCell.key]: char }));
       setStatus('Updated current cell.');
+      trackEvent('crossword_cell_input', {
+        set_id: studySet.id,
+        result: 'typed',
+      });
 
       const nextIndex = Math.min(activeEntry.answer.length - 1, currentIndex + 1);
       const nextKey = getEntryCellKey(activeEntry, nextIndex);
@@ -405,7 +445,7 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [layout, moveSelectionByArrow, selectedCell, selectedEntry, values]);
+  }, [layout, moveSelectionByArrow, selectedCell, selectedEntry, values, studySet.id, trackEvent]);
 
   const revealEntry = (entry: PlacedEntry) => {
     setValues((prev) => {
@@ -416,6 +456,11 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
       return next;
     });
     setStatus(`Revealed ${entry.orientation} clue ${entry.number}.`);
+    trackEvent('crossword_reveal_clue', {
+      set_id: studySet.id,
+      direction: entry.orientation,
+      index: entry.number,
+    });
   };
 
   const revealAll = () => {
@@ -430,11 +475,17 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
       return next;
     });
     setStatus('Revealed all answers.');
+    trackEvent('crossword_reveal_all', {
+      set_id: studySet.id,
+    });
   };
 
   const clearGrid = () => {
     setValues({});
     setStatus('Cleared the grid.');
+    trackEvent('crossword_clear', {
+      set_id: studySet.id,
+    });
   };
 
   if (!layout || !layout.placedEntries.length) {
@@ -516,6 +567,9 @@ export function CrosswordGame({ studySet, data }: GameComponentProps) {
                     onClick={() => {
                       if (selectedCellKey === cell.key && cell.acrossId && cell.downId) {
                         setDirection((prev) => (prev === 'across' ? 'down' : 'across'));
+                        trackEvent('crossword_direction_toggle', {
+                          set_id: studySet.id,
+                        });
                         return;
                       }
                       setSelectedCellKey(cell.key);

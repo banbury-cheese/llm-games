@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { CaterpillarIcon, SnackIcon } from '@/components/ui/BrandIcons';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -209,6 +210,7 @@ function labelForKey(key: string) {
 }
 
 export function HungryBugGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const questions = useMemo(() => cleanQuestionData(data, studySet.terms), [data, studySet.terms]);
   const [state, setState] = useState<HungryBugState>(() => createInitialState(questions.length, questions));
   const [speedPreset, setSpeedPreset] = useState<SpeedPreset>('normal');
@@ -221,6 +223,7 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
   const foodRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const completionTrackedRef = useRef(false);
 
   useEffect(() => {
     setState(createInitialState(questions.length, questions));
@@ -356,6 +359,11 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
     const gsap = initGSAP();
 
     if (state.eventKind === 'correct') {
+      trackEvent('hungrybug_food_hit', {
+        set_id: studySet.id,
+        result: 'correct',
+        score: state.score,
+      });
       if (headRef.current) {
         gsap.fromTo(headRef.current, { scale: 1 }, { scale: 1.18, yoyo: true, repeat: 1, duration: 0.12, ease: 'power1.out' });
       }
@@ -365,15 +373,39 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
     }
 
     if (state.eventKind === 'wrong' || state.eventKind === 'crash') {
+      trackEvent(
+        state.eventKind === 'wrong' ? 'hungrybug_food_hit' : 'hungrybug_run_end',
+        {
+          set_id: studySet.id,
+          result: state.eventKind === 'wrong' ? 'wrong' : 'crash',
+          score: state.score,
+          wrong_count: state.wrongEats,
+        },
+      );
       if (boardRef.current) {
         gsap.fromTo(boardRef.current, { x: 0 }, { x: 6, duration: 0.045, repeat: 5, yoyo: true, ease: 'power1.inOut' });
       }
     }
 
     if (state.eventKind === 'complete' && panelRef.current) {
+      trackEvent('hungrybug_run_end', {
+        set_id: studySet.id,
+        result: 'complete',
+        score: state.score,
+        wrong_count: state.wrongEats,
+      });
+      if (!completionTrackedRef.current) {
+        completionTrackedRef.current = true;
+        trackEvent('game_session_complete', {
+          set_id: studySet.id,
+          game_type: 'hungry-bug',
+          result: 'complete',
+          score: state.score,
+        });
+      }
       gsap.fromTo(panelRef.current, { scale: 0.99 }, { scale: 1.01, duration: 0.2, yoyo: true, repeat: 1, ease: 'power1.out' });
     }
-  }, [state.eventKind, state.eventNonce]);
+  }, [state.eventKind, state.eventNonce, state.score, state.wrongEats, studySet.id, trackEvent]);
 
   useEffect(() => {
     if (!state.foods.length) return;
@@ -388,6 +420,10 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
     if (running) return;
     setRunStartedAt(Date.now());
     setRunning(true);
+    trackEvent('hungrybug_run_start_pause_resume_restart', {
+      set_id: studySet.id,
+      action: elapsedBaseMs > 0 ? 'resume' : 'start',
+    });
   };
 
   const pauseGame = () => {
@@ -397,6 +433,10 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
     setRunStartedAt(null);
     setClockNow(now);
     setRunning(false);
+    trackEvent('hungrybug_run_start_pause_resume_restart', {
+      set_id: studySet.id,
+      action: 'pause',
+    });
   };
 
   const restartGame = () => {
@@ -405,6 +445,19 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
     setElapsedBaseMs(0);
     setRunStartedAt(null);
     setClockNow(Date.now());
+    completionTrackedRef.current = false;
+    trackEvent('hungrybug_run_start_pause_resume_restart', {
+      set_id: studySet.id,
+      action: 'restart',
+    });
+  };
+
+  const updateSpeedPreset = (preset: SpeedPreset) => {
+    setSpeedPreset(preset);
+    trackEvent('hungrybug_speed_change', {
+      set_id: studySet.id,
+      speed_preset: preset,
+    });
   };
 
   useEffect(() => {
@@ -416,6 +469,10 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
       if (!running && !state.gameOver && !state.completed) {
         setRunStartedAt(Date.now());
         setRunning(true);
+        trackEvent('hungrybug_run_start_pause_resume_restart', {
+          set_id: studySet.id,
+          action: elapsedBaseMs > 0 ? 'resume' : 'start',
+        });
       }
 
       setState((prev) => {
@@ -427,7 +484,7 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
 
     window.addEventListener('keydown', onKeyDown, { passive: false });
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [running, state.gameOver, state.completed]);
+  }, [running, state.gameOver, state.completed, elapsedBaseMs, studySet.id, trackEvent]);
 
   if (!questions.length) {
     return (
@@ -480,7 +537,7 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
                       <button
                         key={preset}
                         type="button"
-                        onClick={() => setSpeedPreset(preset)}
+                        onClick={() => updateSpeedPreset(preset)}
                         className="rounded-full px-3 py-1 text-xs font-semibold transition"
                         style={{
                           background: active ? 'rgba(175,163,255,0.18)' : 'transparent',
@@ -614,7 +671,7 @@ export function HungryBugGame({ studySet, data }: GameComponentProps) {
                     <button
                       key={`bottom-${preset}`}
                       type="button"
-                      onClick={() => setSpeedPreset(preset)}
+                      onClick={() => updateSpeedPreset(preset)}
                       className="rounded-full px-3 py-1 text-xs font-semibold transition"
                       style={{
                         background: active ? 'rgba(127,178,255,0.16)' : 'transparent',

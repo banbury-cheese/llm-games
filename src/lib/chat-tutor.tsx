@@ -10,11 +10,13 @@ import {
   type ReactNode,
 } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { MarkdownMessage } from '@/components/chat/MarkdownMessage';
 import { TutorSparkIcon } from '@/components/ui/BrandIcons';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { TextArea } from '@/components/ui/TextArea';
+import { getAnalyticsRequestHeaders } from '@/lib/analytics/session';
 import { initGSAP } from '@/lib/gsap';
 import { aiSettingsStore } from '@/lib/storage';
 import type { Term } from '@/types/study-set';
@@ -194,6 +196,7 @@ function ensureGreetingMessage(messages: TutorMessage[], context: TutorContextDa
 }
 
 export function ChatTutorProvider({ children }: { children: ReactNode }) {
+  const { trackEvent } = useAnalytics();
   const [isOpen, setIsOpen] = useState(false);
   const [activeSessionKey, setActiveSessionKey] = useState(DEFAULT_TUTOR_SESSION_KEY);
   const [sessions, setSessions] = useState<Record<string, TutorSessionState>>({});
@@ -313,8 +316,12 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
           contextData,
         };
       });
+      trackEvent('tutor_reset', {
+        mode: 'conversation',
+        set_id: resolvedKey.startsWith('study-set:') ? resolvedKey.replace('study-set:', '') : undefined,
+      });
     },
-    [patchSession],
+    [patchSession, trackEvent],
   );
 
   const sendMessage = useCallback(
@@ -323,6 +330,12 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
       const currentSession = sessionsRef.current[resolvedKey] ?? createSessionState();
       const text = (rawText ?? currentSession.inputValue).trim();
       if (!text || currentSession.loading) return;
+      const requestStartedAt = Date.now();
+      const setId = resolvedKey.startsWith('study-set:') ? resolvedKey.replace('study-set:', '') : undefined;
+      trackEvent('tutor_message_send', {
+        mode: 'chat',
+        set_id: setId,
+      });
 
       const settings = aiSettingsStore.get();
       if (!settings.apiKey.trim()) {
@@ -333,6 +346,11 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
           error: 'Add an API key in Settings before using the tutor.',
         }));
         setIsOpen(true);
+        trackEvent('tutor_message_result', {
+          result: 'error',
+          reason: 'missing_api_key',
+          set_id: setId,
+        });
         return;
       }
 
@@ -357,7 +375,10 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
       try {
         const response = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAnalyticsRequestHeaders(),
+          },
           body: JSON.stringify({
             setTitle: targetContext.setTitle,
             tutorInstruction: targetContext.tutorInstruction,
@@ -409,12 +430,23 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
             ),
           }));
         }
+
+        trackEvent('tutor_message_result', {
+          result: 'success',
+          set_id: setId,
+          duration_ms: Date.now() - requestStartedAt,
+        });
       } catch (chatError) {
         patchSession(resolvedKey, (session) => ({
           ...session,
           error: chatError instanceof Error ? chatError.message : 'Unexpected chat error.',
           messages: session.messages.filter((message) => message.id !== assistantMessage.id),
         }));
+        trackEvent('tutor_message_result', {
+          result: 'error',
+          set_id: setId,
+          duration_ms: Date.now() - requestStartedAt,
+        });
       } finally {
         patchSession(resolvedKey, (session) => ({
           ...session,
@@ -422,7 +454,7 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
         }));
       }
     },
-    [patchSession],
+    [patchSession, trackEvent],
   );
 
   const closeTutor = useCallback(() => setIsOpen(false), []);
@@ -430,9 +462,14 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
   const openTutor = useCallback(
     (options?: OpenTutorOptions) => {
       const resolvedKey = normalizeSessionKey(options?.sessionKey ?? activeSessionKeyRef.current);
+      const setId = resolvedKey.startsWith('study-set:') ? resolvedKey.replace('study-set:', '') : undefined;
       activeSessionKeyRef.current = resolvedKey;
       setActiveSessionKey(resolvedKey);
       setIsOpen(true);
+      trackEvent('tutor_open', {
+        mode: resolvedKey === DEFAULT_TUTOR_SESSION_KEY ? 'global' : 'study_set',
+        set_id: setId,
+      });
 
       if (options?.setTitle || options?.terms || options?.tutorInstruction) {
         attachContext({
@@ -472,7 +509,7 @@ export function ChatTutorProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [attachContext, patchSession, resetConversation, sendMessage, setSessionInputValue],
+    [attachContext, patchSession, resetConversation, sendMessage, setSessionInputValue, trackEvent],
   );
 
   useEffect(() => {

@@ -2,6 +2,7 @@ import { generateObject, generateText } from 'ai';
 import { NextResponse } from 'next/server';
 import type { z } from 'zod';
 
+import { getAnalyticsHeaders, trackServerApiRequest } from '@/lib/analytics/server';
 import { buildGamePrompt, buildTermExtractionPrompt } from '@/lib/ai/prompts';
 import { getLanguageModel } from '@/lib/ai/providers';
 import {
@@ -120,15 +121,34 @@ function localFallbackGameData(gameType: GameType, terms: Array<{ term: string; 
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
+  const analytics = getAnalyticsHeaders(request);
   try {
     const body = await request.json();
     const parsed = generateRouteSchema.safeParse(body);
 
     if (!parsed.success) {
+      await trackServerApiRequest({
+        clientId: analytics.clientId,
+        consent: analytics.consent,
+        apiRoute: '/api/generate',
+        result: 'error',
+        statusCode: 400,
+        durationMs: Date.now() - startedAt,
+        errorCode: 'bad_request',
+      });
       return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
     }
 
     const { mode, settings } = parsed.data;
+    await trackServerApiRequest({
+      clientId: analytics.clientId,
+      consent: analytics.consent,
+      apiRoute: '/api/generate',
+      apiMode: mode,
+      provider: settings.provider,
+      result: 'start',
+    });
     const maxTermsPerDeck = resolveMaxTermsPerDeck(settings);
 
     if (mode === 'extract-terms') {
@@ -150,11 +170,23 @@ export async function POST(request: Request) {
             '{"title":"string","description":"string","terms":[{"term":"string","definition":"string"}]}',
         });
 
-        return NextResponse.json({
+        const response = NextResponse.json({
           ...result,
           terms: dedupeTerms(result.terms).slice(0, maxTermsPerDeck),
           source: 'llm',
         });
+        await trackServerApiRequest({
+          clientId: analytics.clientId,
+          consent: analytics.consent,
+          apiRoute: '/api/generate',
+          apiMode: mode,
+          provider: settings.provider,
+          result: 'success',
+          statusCode: response.status,
+          durationMs: Date.now() - startedAt,
+          extra: { source: 'llm' },
+        });
+        return response;
       } catch (error) {
         const fallbackText = parsed.data.inputText ?? parsed.data.topic ?? '';
         const chunks = fallbackText
@@ -180,17 +212,40 @@ export async function POST(request: Request) {
           );
         }
 
-        return NextResponse.json({
+        const response = NextResponse.json({
           title: parsed.data.topic?.trim() || 'New Study Set',
           description: 'Generated locally because LLM extraction was unavailable.',
           terms: dedupeTerms(fallbackTerms).slice(0, maxTermsPerDeck),
           source: 'fallback',
           warning: error instanceof Error ? error.message : 'LLM extraction failed.',
         });
+        await trackServerApiRequest({
+          clientId: analytics.clientId,
+          consent: analytics.consent,
+          apiRoute: '/api/generate',
+          apiMode: mode,
+          provider: settings.provider,
+          result: 'success',
+          statusCode: response.status,
+          durationMs: Date.now() - startedAt,
+          extra: { source: 'fallback' },
+        });
+        return response;
       }
     }
 
     if (!parsed.data.gameType || !parsed.data.terms?.length) {
+      await trackServerApiRequest({
+        clientId: analytics.clientId,
+        consent: analytics.consent,
+        apiRoute: '/api/generate',
+        apiMode: mode,
+        provider: settings.provider,
+        result: 'error',
+        statusCode: 400,
+        durationMs: Date.now() - startedAt,
+        errorCode: 'invalid_game_data_request',
+      });
       return NextResponse.json(
         { error: 'gameType and terms are required when mode is game-data.' },
         { status: 400 },
@@ -218,21 +273,55 @@ export async function POST(request: Request) {
               : '{"items":[],"note":"string"}',
       });
 
-      return NextResponse.json({ gameType, data: result, source: 'llm' });
+      const response = NextResponse.json({ gameType, data: result, source: 'llm' });
+      await trackServerApiRequest({
+        clientId: analytics.clientId,
+        consent: analytics.consent,
+        apiRoute: '/api/generate',
+        apiMode: mode,
+        provider: settings.provider,
+        result: 'success',
+        statusCode: response.status,
+        durationMs: Date.now() - startedAt,
+        extra: { game_type: gameType, source: 'llm' },
+      });
+      return response;
     } catch (error) {
-      return NextResponse.json({
+      const response = NextResponse.json({
         gameType,
         data: localFallbackGameData(gameType, terms),
         source: 'fallback',
         warning: error instanceof Error ? error.message : 'LLM game generation failed.',
       });
+      await trackServerApiRequest({
+        clientId: analytics.clientId,
+        consent: analytics.consent,
+        apiRoute: '/api/generate',
+        apiMode: mode,
+        provider: settings.provider,
+        result: 'success',
+        statusCode: response.status,
+        durationMs: Date.now() - startedAt,
+        extra: { game_type: gameType, source: 'fallback' },
+      });
+      return response;
     }
   } catch (error) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         error: error instanceof Error ? error.message : 'Unexpected error during generation.',
       },
       { status: 500 },
     );
+    await trackServerApiRequest({
+      clientId: analytics.clientId,
+      consent: analytics.consent,
+      apiRoute: '/api/generate',
+      result: 'error',
+      statusCode: response.status,
+      durationMs: Date.now() - startedAt,
+      errorCode: error instanceof Error ? error.name : 'unexpected_error',
+    });
+    return response;
   }
 }

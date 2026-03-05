@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { initGSAP } from '@/lib/gsap';
@@ -209,6 +210,7 @@ function PileTile({
 }
 
 export function FlashcardsGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const cards = useMemo(() => normalizeCards(data, studySet.terms), [data, studySet.terms]);
   const allIds = useMemo(() => cards.map((card) => card.id), [cards]);
   const cardMap = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
@@ -232,6 +234,8 @@ export function FlashcardsGame({ studySet, data }: GameComponentProps) {
   const previousActiveIdRef = useRef<string | null>(null);
   const entryFromPileRef = useRef<PileKind | null>(null);
   const exitDelayTimeoutRef = useRef<number | null>(null);
+  const flipTrackedRef = useRef(false);
+  const completionTrackedRef = useRef(false);
 
   const currentCardId = remainingIds[0] ?? null;
   const currentCard = currentCardId ? cardMap.get(currentCardId) ?? null : null;
@@ -253,7 +257,37 @@ export function FlashcardsGame({ studySet, data }: GameComponentProps) {
     setStatus('Click the card to flip. Send it to Know or Don’t know using the piles below.');
     previousActiveIdRef.current = null;
     entryFromPileRef.current = null;
+    completionTrackedRef.current = false;
   }, [allIds]);
+
+  useEffect(() => {
+    if (!flipTrackedRef.current) {
+      flipTrackedRef.current = true;
+      return;
+    }
+    trackEvent('flashcards_flip', {
+      set_id: studySet.id,
+      game_type: 'flashcards',
+      result: flipped ? 'flipped' : 'unflipped',
+    });
+  }, [flipped, studySet.id, trackEvent]);
+
+  useEffect(() => {
+    if (!isPassComplete || completionTrackedRef.current) return;
+    completionTrackedRef.current = true;
+    trackEvent('flashcards_pass_complete', {
+      set_id: studySet.id,
+      score: knowPercent,
+      retries,
+    });
+    trackEvent('game_session_complete', {
+      set_id: studySet.id,
+      game_type: 'flashcards',
+      result: 'complete',
+      score: knowPercent,
+      retries,
+    });
+  }, [isPassComplete, knowPercent, retries, studySet.id, trackEvent]);
 
   useEffect(() => {
     return () => {
@@ -516,6 +550,10 @@ export function FlashcardsGame({ studySet, data }: GameComponentProps) {
       );
       pulsePile('remaining');
     }, { waitForEntry: true });
+    trackEvent('flashcards_cycle', {
+      set_id: studySet.id,
+      action: shuffleAfter ? 'shuffle' : 'cycle',
+    });
   };
 
   const classifyCurrentCard = (target: 'know' | 'dontKnow') => {
@@ -542,6 +580,10 @@ export function FlashcardsGame({ studySet, data }: GameComponentProps) {
         setElapsedMs(Date.now() - runStartedAt);
       }
     }, { waitForEntry: willHaveNextCard });
+    trackEvent('flashcards_classify', {
+      set_id: studySet.id,
+      result: target === 'know' ? 'know' : 'dont_know',
+    });
   };
 
   const retryDontKnow = () => {
@@ -558,6 +600,10 @@ export function FlashcardsGame({ studySet, data }: GameComponentProps) {
     setFlipped(false);
     setStatus('Retry started: cards from the Don’t know pile moved back to Remaining.');
     pulsePile('remaining');
+    trackEvent('flashcards_retry', {
+      set_id: studySet.id,
+      retries: retries + 1,
+    });
   };
 
   const restartAllCards = () => {
@@ -579,6 +625,10 @@ export function FlashcardsGame({ studySet, data }: GameComponentProps) {
     setStatus('All cards restarted and returned to the remaining pile.');
     previousActiveIdRef.current = null;
     pulsePile('remaining');
+    trackEvent('flashcards_restart', {
+      set_id: studySet.id,
+      action: 'restart_all',
+    });
   };
 
   useEffect(() => {

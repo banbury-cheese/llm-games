@@ -7,6 +7,7 @@ export const STORAGE_KEYS = {
   studySets: 'llm-games:study-sets',
   aiSettings: 'llm-games:ai-settings',
   theme: 'llm-games:theme',
+  analyticsConsent: 'llm-games:analytics-consent',
 } as const;
 
 function readJSON<T>(key: string, fallback: T): T {

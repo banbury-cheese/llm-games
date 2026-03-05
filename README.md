@@ -90,6 +90,19 @@ Go to `/settings` and save:
 
 This is stored in **browser localStorage** (MVP behavior).
 
+### 4. Configure GA4 (optional)
+
+Set these environment variables before running in production:
+
+```bash
+NEXT_PUBLIC_GA_MEASUREMENT_ID=G-XXXXXXXXXX
+GA_API_SECRET=your_measurement_protocol_secret
+# Optional for QA in non-production:
+# NEXT_PUBLIC_ANALYTICS_FORCE=true
+```
+
+Analytics is explicit opt-in, session-scoped, and privacy-sanitized by default.
+
 ## Available Scripts
 
 ```bash

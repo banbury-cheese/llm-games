@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { initGSAP } from '@/lib/gsap';
@@ -168,6 +169,7 @@ function SnowmanSvg({ wrongCount }: { wrongCount: number }) {
 }
 
 export function SnowmanGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const rounds = useMemo(() => normalizeRounds(data, studySet.terms), [data, studySet.terms]);
   const [roundIndex, setRoundIndex] = useState(0);
   const [guessedLetters, setGuessedLetters] = useState<string[]>([]);
@@ -177,6 +179,7 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
   const [failedCount, setFailedCount] = useState(0);
   const [totalHintsUsed, setTotalHintsUsed] = useState(0);
   const [status, setStatus] = useState('Guess letters to complete the word before the snowman breaks apart.');
+  const completionTrackedRef = useRef(false);
 
   const current = rounds[roundIndex];
   const roundComplete = roundIndex >= rounds.length;
@@ -214,7 +217,12 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
       setFailedCount((prev) => prev + 1);
       setStatus(`Snowman broke apart. The answer was ${current.displayAnswer}.`);
     }
-  }, [current]);
+    trackEvent('snowman_round_complete', {
+      set_id: studySet.id,
+      result,
+      index: roundIndex,
+    });
+  }, [current, roundIndex, studySet.id, trackEvent]);
 
   const guessLetter = useCallback((letter: string) => {
     if (!current || isSolved || isFailed) return;
@@ -224,6 +232,10 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
       const nextGuessed = [...guessedLetters, letter];
       setGuessedLetters(nextGuessed);
       setStatus(`Nice! ${letter} is in the word.`);
+      trackEvent('snowman_guess', {
+        set_id: studySet.id,
+        result: 'correct',
+      });
 
       const solved = uniqueAnswerLetters.every((l) => nextGuessed.includes(l));
       if (solved) {
@@ -235,11 +247,15 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
     const nextWrong = [...wrongLetters, letter];
     setWrongLetters(nextWrong);
     setStatus(`${letter} is not in the word.`);
+    trackEvent('snowman_guess', {
+      set_id: studySet.id,
+      result: 'wrong',
+    });
 
     if (nextWrong.length >= MAX_WRONG) {
       window.setTimeout(() => finalizeRound('failed'), 20);
     }
-  }, [current, isSolved, isFailed, guessedLetters, wrongLetters, uniqueAnswerLetters, finalizeRound]);
+  }, [current, isSolved, isFailed, guessedLetters, wrongLetters, uniqueAnswerLetters, finalizeRound, studySet.id, trackEvent]);
 
   const useHint = () => {
     if (!current || usedHint || isSolved || isFailed) return;
@@ -250,7 +266,26 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
     setUsedHint(true);
     setTotalHintsUsed((prev) => prev + 1);
     setStatus(`Hint used: revealed the letter ${reveal}.`);
+    trackEvent('snowman_hint', { set_id: studySet.id, index: roundIndex });
   };
+
+  useEffect(() => {
+    if (!roundComplete || completionTrackedRef.current) return;
+    completionTrackedRef.current = true;
+    trackEvent('snowman_game_complete', {
+      set_id: studySet.id,
+      total_count: rounds.length,
+      correct_count: solvedCount,
+      wrong_count: failedCount,
+      attempts: totalHintsUsed,
+    });
+    trackEvent('game_session_complete', {
+      set_id: studySet.id,
+      game_type: 'snowman',
+      result: 'complete',
+      score: solvedCount,
+    });
+  }, [roundComplete, rounds.length, solvedCount, failedCount, totalHintsUsed, studySet.id, trackEvent]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -297,6 +332,7 @@ export function SnowmanGame({ studySet, data }: GameComponentProps) {
           <Button
             type="button"
             onClick={() => {
+              completionTrackedRef.current = false;
               setRoundIndex(0);
               setSolvedCount(0);
               setFailedCount(0);

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { v4 as uuidv4 } from 'uuid';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { TermEditor } from '@/components/create/TermEditor';
 import { TextInput } from '@/components/create/TextInput';
 import { TopicInput } from '@/components/create/TopicInput';
@@ -12,6 +13,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { TextArea } from '@/components/ui/TextArea';
+import { getAnalyticsRequestHeaders } from '@/lib/analytics/session';
 import { extractTextFromPdf } from '@/lib/pdf';
 import { aiSettingsStore, studySetStore } from '@/lib/storage';
 import { DEFAULT_AI_SETTINGS } from '@/types/settings';
@@ -33,6 +35,7 @@ interface GenerateTermsResponse {
 }
 
 function CreatePageContent() {
+  const { trackEvent } = useAnalytics();
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get('edit');
@@ -125,13 +128,27 @@ function CreatePageContent() {
     setDocumentLoading(true);
     setError(null);
     setStatus(null);
+    trackEvent('pdf_extract_start', {
+      mode: 'create',
+      source_type: 'document',
+      file_size_bucket:
+        file.size < 300_000
+          ? 'lt_300kb'
+          : file.size < 1_000_000
+            ? '300kb_1mb'
+            : file.size < 5_000_000
+              ? '1mb_5mb'
+              : 'gte_5mb',
+    });
     try {
       const extracted = await extractTextFromPdf(file);
       setDocumentText(extracted);
       setDocumentFileName(file.name);
       setStatus(`Extracted ${Math.max(1, Math.round(extracted.length / 5))} words from ${file.name}`);
+      trackEvent('pdf_extract_result', { result: 'success', source_type: 'document' });
     } catch (pdfError) {
       setError(pdfError instanceof Error ? pdfError.message : 'Failed to extract PDF text.');
+      trackEvent('pdf_extract_result', { result: 'error', source_type: 'document' });
     } finally {
       setDocumentLoading(false);
     }
@@ -143,13 +160,17 @@ function CreatePageContent() {
     setIsGenerating(true);
     setError(null);
     setStatus(null);
+    trackEvent('terms_generate_start', { source_type: mode, mode: isEditing ? 'edit' : 'create' });
 
     const settings = aiSettingsStore.get();
 
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAnalyticsRequestHeaders(),
+        },
         body: JSON.stringify({
           mode: 'extract-terms',
           inputText: mode === 'text' || mode === 'document' ? activeSourceContent : undefined,
@@ -185,8 +206,18 @@ function CreatePageContent() {
       setStatus(
         `${result.source === 'fallback' ? 'Fallback generation used.' : 'Terms generated.'} ${cappedTerms.length} term${cappedTerms.length === 1 ? '' : 's'} ready for review.${trimmedCount ? ` Trimmed ${trimmedCount} to respect your Settings deck limit (${settings.maxTermsPerDeck}).` : ''}${isEditing ? ' Saving will replace the deck terms and reset cached game data.' : ''}${result.warning ? ` ${result.warning}` : ''}`,
       );
+      trackEvent('terms_generate_result', {
+        source_type: mode,
+        result: result.source === 'fallback' ? 'fallback' : 'success',
+        terms_count: cappedTerms.length,
+        has_warning: Boolean(result.warning),
+      });
     } catch (generateError) {
       setError(generateError instanceof Error ? generateError.message : 'Unexpected generation error.');
+      trackEvent('terms_generate_result', {
+        source_type: mode,
+        result: 'error',
+      });
     } finally {
       setIsGenerating(false);
     }
@@ -247,6 +278,13 @@ function CreatePageContent() {
       };
 
       studySetStore.upsert(updatedSet);
+      trackEvent('set_save', {
+        mode: 'update',
+        source_type: mode,
+        set_id: editSourceSet.id,
+        terms_count: cleanedTerms.length,
+        result: 'success',
+      });
       router.push(`/set/${editSourceSet.id}`);
       return;
     }
@@ -266,6 +304,13 @@ function CreatePageContent() {
     };
 
     studySetStore.upsert(studySet);
+    trackEvent('set_save', {
+      mode: 'create',
+      source_type: mode,
+      set_id: id,
+      terms_count: cleanedTerms.length,
+      result: 'success',
+    });
     router.push(`/set/${id}`);
   };
 
@@ -317,6 +362,7 @@ function CreatePageContent() {
                     key={sourceMode.key}
                     type="button"
                     onClick={() => {
+                      trackEvent('source_mode_change', { source_type: sourceMode.key });
                       setMode(sourceMode.key);
                       setError(null);
                       setStatus(null);
@@ -457,7 +503,14 @@ function CreatePageContent() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {isEditing ? (
-              <Button type="button" variant="secondary" onClick={() => router.push(editSourceSet ? `/set/${editSourceSet.id}` : '/')}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  trackEvent('set_cancel', { mode: 'edit', source_type: mode, set_id: editSourceSet?.id });
+                  router.push(editSourceSet ? `/set/${editSourceSet.id}` : '/');
+                }}
+              >
                 Cancel
               </Button>
             ) : null}

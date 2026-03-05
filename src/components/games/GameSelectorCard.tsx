@@ -1,5 +1,6 @@
 import Link from 'next/link';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Card } from '@/components/ui/Card';
 import { GameTypeIcon } from '@/components/ui/BrandIcons';
 import type { GameDescriptor } from '@/types/game';
@@ -8,9 +9,11 @@ interface GameSelectorCardProps {
   game: GameDescriptor;
   href: string;
   index: number;
+  setId: string;
 }
 
-export function GameSelectorCard({ game, href, index }: GameSelectorCardProps) {
+export function GameSelectorCard({ game, href, index, setId }: GameSelectorCardProps) {
+  const { trackEvent } = useAnalytics();
   const colors = ['#F35757', '#A6BE59', '#ECD227', '#AFA3FF', '#EC683E', '#F2995E', '#7FB2FF', '#BFBAB4'];
   const accent = colors[index % colors.length];
   const rotation = ((index % 5) - 2) * 0.7;
@@ -38,7 +41,12 @@ export function GameSelectorCard({ game, href, index }: GameSelectorCardProps) {
   }
 
   return (
-    <Link href={href} className="block h-full" data-game-tile>
+    <Link
+      href={href}
+      className="block h-full"
+      data-game-tile
+      onClick={() => trackEvent('game_view', { set_id: setId, game_type: game.type, mode: 'selector_click' })}
+    >
       <Card
         interactive
         className="group relative h-full rounded-[22px] border-0 p-4 shadow-card sm:p-5"

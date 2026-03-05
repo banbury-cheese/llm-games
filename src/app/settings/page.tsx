@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { aiSettingsStore } from '@/lib/storage';
 import { getDefaultModelForProvider } from '@/lib/ai/providers';
 import type { AIProvider } from '@/types/settings';
@@ -17,6 +18,7 @@ const providerDescriptions: Record<AIProvider, string> = {
 };
 
 export default function SettingsPage() {
+  const { consent, setConsent, canTrack } = useAnalytics();
   const [form, setForm] = useState<AISettings>(DEFAULT_AI_SETTINGS);
   const [saved, setSaved] = useState(false);
 
@@ -223,6 +225,38 @@ export default function SettingsPage() {
             </div>
             <div className="rounded-2xl border border-dashed p-4 text-xs leading-5 text-[var(--text-muted)]" style={{ borderColor: 'var(--border)' }}>
               The app falls back to local deterministic generation if the API call fails, so you can still test flows while wiring credentials.
+            </div>
+
+            <div
+              className="rounded-2xl border p-4 sm:p-5"
+              style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
+            >
+              <h3 className="text-sm font-semibold">Analytics & Privacy</h3>
+              <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+                We collect anonymous usage metrics only after consent. We never send API keys, prompts, PDF text, terms, or chat content.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span
+                  className="rounded-full border px-3 py-1 text-xs font-semibold"
+                  style={{ borderColor: 'var(--border)' }}
+                >
+                  Consent: {consent}
+                </span>
+                <span
+                  className="rounded-full border px-3 py-1 text-xs font-semibold"
+                  style={{ borderColor: 'var(--border)' }}
+                >
+                  Runtime: {canTrack ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button type="button" size="sm" onClick={() => setConsent('granted')}>
+                  Allow Analytics
+                </Button>
+                <Button type="button" size="sm" variant="secondary" onClick={() => setConsent('denied')}>
+                  Disable Analytics
+                </Button>
+              </div>
             </div>
           </div>
         </Card>

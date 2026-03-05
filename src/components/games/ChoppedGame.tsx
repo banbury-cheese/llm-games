@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { initGSAP } from '@/lib/gsap';
@@ -123,6 +124,7 @@ function buildChunkPool(puzzles: ChunkPuzzle[]) {
 }
 
 export function ChoppedGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const puzzles = useMemo(() => normalizePuzzles(data, studySet.terms), [data, studySet.terms]);
   const [pool, setPool] = useState<ChunkToken[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -133,6 +135,7 @@ export function ChoppedGame({ studySet, data }: GameComponentProps) {
   const chunkRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const composeRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLDivElement>(null);
+  const completionTrackedRef = useRef(false);
 
   useEffect(() => {
     setPool(buildChunkPool(puzzles));
@@ -185,10 +188,18 @@ export function ChoppedGame({ studySet, data }: GameComponentProps) {
     setSelectedIds((prev) => [...prev, id]);
     setFeedback({ kind: 'idle', message: '' });
     pulseChunk(id, 'good');
+    trackEvent('chopped_chunk_select_remove', {
+      set_id: studySet.id,
+      action: 'select',
+    });
   };
 
   const removeSelected = (id: string) => {
     setSelectedIds((prev) => prev.filter((currentId) => currentId !== id));
+    trackEvent('chopped_chunk_select_remove', {
+      set_id: studySet.id,
+      action: 'remove',
+    });
   };
 
   const clearSelection = () => {
@@ -204,6 +215,10 @@ export function ChoppedGame({ studySet, data }: GameComponentProps) {
       setPool((prev) => prev.filter((token) => !selectedIds.includes(token.id)));
       setSelectedIds([]);
       setFeedback({ kind: 'correct', message: `Nice. ${activePuzzle.displayAnswer || activePuzzle.answer} is correct.` });
+      trackEvent('chopped_check', {
+        set_id: studySet.id,
+        result: 'correct',
+      });
 
       const gsap = initGSAP();
       if (composeRef.current) {
@@ -223,6 +238,10 @@ export function ChoppedGame({ studySet, data }: GameComponentProps) {
     }
 
     setFeedback({ kind: 'wrong', message: 'Not quite. Try a different chunk combination for this clue.' });
+    trackEvent('chopped_check', {
+      set_id: studySet.id,
+      result: 'wrong',
+    });
     const gsap = initGSAP();
     if (composeRef.current) {
       gsap.fromTo(composeRef.current, { x: 0 }, { x: 6, yoyo: true, repeat: 3, duration: 0.05, ease: 'power1.inOut' });
@@ -237,7 +256,24 @@ export function ChoppedGame({ studySet, data }: GameComponentProps) {
     setPool([]);
     setSelectedIds([]);
     setFeedback({ kind: 'wrong', message: 'Answers revealed. You can restart to try again.' });
+    trackEvent('chopped_give_up', { set_id: studySet.id });
   };
+
+  useEffect(() => {
+    if (!complete || completionTrackedRef.current) return;
+    completionTrackedRef.current = true;
+    trackEvent('chopped_complete', {
+      set_id: studySet.id,
+      score: solvedCount,
+      total_count: puzzles.length,
+    });
+    trackEvent('game_session_complete', {
+      set_id: studySet.id,
+      game_type: 'chopped',
+      result: 'complete',
+      score: solvedCount,
+    });
+  }, [complete, solvedCount, puzzles.length, studySet.id, trackEvent]);
 
   if (!puzzles.length) {
     return (
@@ -363,11 +399,13 @@ export function ChoppedGame({ studySet, data }: GameComponentProps) {
                 type="button"
                 variant="secondary"
                 onClick={() => {
+                  trackEvent('chopped_restart', { set_id: studySet.id });
                   setPool(buildChunkPool(puzzles));
                   setSolvedAnswers({});
                   setSelectedIds([]);
                   setFeedback({ kind: 'idle', message: '' });
                   setActivePuzzleId(puzzles[0]?.id ?? null);
+                  completionTrackedRef.current = false;
                 }}
               >
                 Restart

@@ -1,3 +1,5 @@
+import { getAnalyticsRequestHeaders } from '@/lib/analytics/session';
+
 type PdfExtractResponse = {
   text?: string;
   error?: string;
@@ -9,6 +11,7 @@ export async function extractTextFromPdf(file: File) {
 
   const response = await fetch('/api/pdf-extract', {
     method: 'POST',
+    headers: getAnalyticsRequestHeaders(),
     body: formData,
   });
 

@@ -1,4 +1,5 @@
 import { aiSettingsStore, studySetStore } from '@/lib/storage';
+import { getAnalyticsRequestHeaders } from '@/lib/analytics/session';
 import { GameType } from '@/types/game';
 import type { StudySet, Term } from '@/types/study-set';
 
@@ -382,7 +383,10 @@ export async function generateAndCacheGameData(
     const sampledTerms = sampleUpTo(studySet.terms, limits.maxTermsPerDeck);
     const response = await fetch('/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAnalyticsRequestHeaders(),
+      },
       body: JSON.stringify({
         mode: 'game-data',
         gameType,

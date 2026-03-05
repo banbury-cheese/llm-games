@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useChatTutor } from '@/lib/chat-tutor';
@@ -92,6 +93,7 @@ function buildQuizExplainPrompt(question: QuizQuestion, selectedIndex: number | 
 }
 
 export function QuizGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const { openTutor } = useChatTutor();
   const questions = useMemo(() => normalizeQuestions(data, studySet.terms), [data, studySet.terms]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -137,6 +139,11 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
               <Button
                 type="button"
                 onClick={() => {
+                  trackEvent('quiz_restart', {
+                    set_id: studySet.id,
+                    score,
+                    total_count: questions.length,
+                  });
                   setAnswers({});
                   setCurrentIndex(0);
                   setShowResults(false);
@@ -213,6 +220,15 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
   const isAnswered = typeof selectedIndex === 'number';
   const isCorrect = isAnswered && selectedIndex === currentQuestion.correctIndex;
   const openAiExplain = (question: QuizQuestion, answerIndex: number | undefined) => {
+    trackEvent('quiz_ai_explain_open', {
+      set_id: studySet.id,
+      game_type: 'quiz',
+      result: typeof answerIndex === 'number' ? 'selected' : 'none',
+    });
+    trackEvent('quiz_ai_explain', {
+      set_id: studySet.id,
+      game_type: 'quiz',
+    });
     openTutor({
       sessionKey: `study-set:${studySet.id}`,
       setTitle: studySet.title,
@@ -280,7 +296,14 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
                     type="radio"
                     name={currentQuestion.id}
                     checked={checked}
-                    onChange={() => setAnswers((prev) => ({ ...prev, [currentQuestion.id]: optionIndex }))}
+                    onChange={() => {
+                      setAnswers((prev) => ({ ...prev, [currentQuestion.id]: optionIndex }));
+                      trackEvent('quiz_answer_select', {
+                        set_id: studySet.id,
+                        index: currentIndex,
+                        selected: optionIndex,
+                      });
+                    }}
                     className="mt-1"
                   />
                   <span className="text-sm leading-6">{option}</span>
@@ -316,20 +339,57 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
           ) : null}
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Button type="button" variant="secondary" onClick={() => setCurrentIndex((prev) => Math.max(prev - 1, 0))} disabled={currentIndex === 0}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                trackEvent('quiz_next_prev', {
+                  set_id: studySet.id,
+                  action: 'prev',
+                  index: currentIndex,
+                });
+                setCurrentIndex((prev) => Math.max(prev - 1, 0));
+              }}
+              disabled={currentIndex === 0}
+            >
               Previous
             </Button>
             <div className="flex flex-wrap gap-2 sm:justify-end">
               {currentIndex < questions.length - 1 ? (
                 <Button
                   type="button"
-                  onClick={() => setCurrentIndex((prev) => Math.min(prev + 1, questions.length - 1))}
+                  onClick={() => {
+                    trackEvent('quiz_next_prev', {
+                      set_id: studySet.id,
+                      action: 'next',
+                      index: currentIndex,
+                    });
+                    setCurrentIndex((prev) => Math.min(prev + 1, questions.length - 1));
+                  }}
                   disabled={!isAnswered}
                 >
                   Next Question
                 </Button>
               ) : (
-                <Button type="button" onClick={() => setShowResults(true)} disabled={answeredCount !== questions.length}>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    trackEvent('quiz_finish', {
+                      set_id: studySet.id,
+                      score,
+                      total_count: questions.length,
+                    });
+                    trackEvent('game_session_complete', {
+                      set_id: studySet.id,
+                      game_type: 'quiz',
+                      score,
+                      total_count: questions.length,
+                      result: 'complete',
+                    });
+                    setShowResults(true);
+                  }}
+                  disabled={answeredCount !== questions.length}
+                >
                   Finish Quiz
                 </Button>
               )}

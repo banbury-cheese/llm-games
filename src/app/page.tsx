@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { SetGrid } from '@/components/dashboard/SetGrid';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -10,6 +11,7 @@ import { studySetStore } from '@/lib/storage';
 import type { StudySet } from '@/types/study-set';
 
 export default function DashboardPage() {
+  const { trackEvent } = useAnalytics();
   const [sets, setSets] = useState<StudySet[]>([]);
   const [hydrating, setHydrating] = useState(true);
   const [pendingDelete, setPendingDelete] = useState<StudySet | null>(null);
@@ -38,6 +40,11 @@ export default function DashboardPage() {
 
   const confirmDelete = () => {
     if (!pendingDelete) return;
+    trackEvent('set_cache_action', {
+      action: 'delete_set',
+      set_id: pendingDelete.id,
+      result: 'success',
+    });
     studySetStore.delete(pendingDelete.id);
     setSets(studySetStore.list());
     setPendingDelete(null);

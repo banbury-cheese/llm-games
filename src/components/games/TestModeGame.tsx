@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -150,6 +151,7 @@ function scoreItem(item: TestItem, response?: TestResponse) {
 }
 
 export function TestModeGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const items = useMemo(() => normalizeItems(data, studySet.terms), [data, studySet.terms]);
   const [index, setIndex] = useState(0);
   const [responses, setResponses] = useState<Record<string, TestResponse>>({});
@@ -200,6 +202,10 @@ export function TestModeGame({ studySet, data }: GameComponentProps) {
               <Button
                 type="button"
                 onClick={() => {
+                  trackEvent('test_restart', {
+                    set_id: studySet.id,
+                    score: results.percent,
+                  });
                   setResponses({});
                   setIndex(0);
                   setShowResults(false);
@@ -302,12 +308,17 @@ export function TestModeGame({ studySet, data }: GameComponentProps) {
               <Input
                 id={`test-${current.id}`}
                 value={currentResponse?.text ?? ''}
-                onChange={(event) =>
+                onChange={(event) => {
                   setResponses((prev) => ({
                     ...prev,
                     [current.id]: { ...prev[current.id], text: event.target.value },
-                  }))
-                }
+                  }));
+                  trackEvent('test_answer_save', {
+                    set_id: studySet.id,
+                    question_kind: current.kind,
+                    index,
+                  });
+                }}
                 placeholder="Type your answer"
               />
             </div>
@@ -329,12 +340,17 @@ export function TestModeGame({ studySet, data }: GameComponentProps) {
                       type="radio"
                       name={current.id}
                       checked={checked}
-                      onChange={() =>
+                      onChange={() => {
                         setResponses((prev) => ({
                           ...prev,
                           [current.id]: { ...prev[current.id], mcqIndex: optionIndex },
-                        }))
-                      }
+                        }));
+                        trackEvent('test_answer_save', {
+                          set_id: studySet.id,
+                          question_kind: current.kind,
+                          index,
+                        });
+                      }}
                       className="mt-1"
                     />
                     <span className="text-sm leading-6">{option}</span>
@@ -345,16 +361,48 @@ export function TestModeGame({ studySet, data }: GameComponentProps) {
           )}
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Button type="button" variant="secondary" onClick={() => setIndex((prev) => Math.max(0, prev - 1))} disabled={index === 0}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                trackEvent('test_nav', { set_id: studySet.id, action: 'prev', index });
+                setIndex((prev) => Math.max(0, prev - 1));
+              }}
+              disabled={index === 0}
+            >
               Previous
             </Button>
             <div className="flex flex-wrap gap-2 sm:justify-end">
               {index < items.length - 1 ? (
-                <Button type="button" onClick={() => setIndex((prev) => Math.min(items.length - 1, prev + 1))} disabled={!currentAnswered}>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    trackEvent('test_nav', { set_id: studySet.id, action: 'next', index });
+                    setIndex((prev) => Math.min(items.length - 1, prev + 1));
+                  }}
+                  disabled={!currentAnswered}
+                >
                   Next Question
                 </Button>
               ) : (
-                <Button type="button" onClick={() => setShowResults(true)} disabled={answeredCount !== items.length}>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    trackEvent('test_finish', {
+                      set_id: studySet.id,
+                      score: results.percent,
+                      total_count: items.length,
+                    });
+                    trackEvent('game_session_complete', {
+                      set_id: studySet.id,
+                      game_type: 'test',
+                      score: results.percent,
+                      result: 'complete',
+                    });
+                    setShowResults(true);
+                  }}
+                  disabled={answeredCount !== items.length}
+                >
                   Finish Test
                 </Button>
               )}

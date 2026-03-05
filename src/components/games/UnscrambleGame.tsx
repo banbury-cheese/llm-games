@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Draggable } from 'gsap/dist/Draggable';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { initGSAP } from '@/lib/gsap';
@@ -118,6 +119,7 @@ function buildTokens(puzzle: Puzzle): LetterToken[] {
 }
 
 export function UnscrambleGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const puzzles = useMemo(() => normalizePuzzles(data, studySet.terms), [data, studySet.terms]);
   const [index, setIndex] = useState(0);
   const [tokens, setTokens] = useState<LetterToken[]>([]);
@@ -130,6 +132,7 @@ export function UnscrambleGame({ studySet, data }: GameComponentProps) {
   const tokensRef = useRef<LetterToken[]>([]);
   const finalizeGuardRef = useRef<Record<string, boolean>>({});
   const animatedPuzzleRef = useRef<string | null>(null);
+  const gameCompletionTrackedRef = useRef(false);
 
   const current = puzzles[index];
   const currentPuzzleId = current?.id ?? null;
@@ -227,6 +230,9 @@ export function UnscrambleGame({ studySet, data }: GameComponentProps) {
       if (snappedIndex !== fromIndex) {
         setTokens((prev) => moveItem(prev, fromIndex, snappedIndex));
         setFeedback({ kind: 'idle', message: '' });
+        trackEvent('unscramble_drag_reorder', {
+          set_id: studySet.id,
+        });
       } else {
         gsap.to(node, {
           x: fromIndex * SLOT_PITCH,
@@ -239,7 +245,7 @@ export function UnscrambleGame({ studySet, data }: GameComponentProps) {
         });
       }
     },
-    [],
+    [studySet.id, trackEvent],
   );
 
   useEffect(() => {
@@ -320,6 +326,10 @@ export function UnscrambleGame({ studySet, data }: GameComponentProps) {
   const handleShuffleLetters = () => {
     setTokens((prev) => shuffle(prev));
     setFeedback({ kind: 'idle', message: '' });
+    trackEvent('unscramble_shuffle', {
+      set_id: studySet.id,
+      index,
+    });
     const gsap = initGSAP();
     const nodes = tokens.map((token) => tokenRefs.current[token.id]).filter(Boolean);
     if (nodes.length) {
@@ -333,6 +343,15 @@ export function UnscrambleGame({ studySet, data }: GameComponentProps) {
     if (answerString === current.answer) {
       setFeedback({ kind: 'correct', message: `Correct! ${current.displayAnswer}` });
       setSolvedIds((prev) => (prev.includes(current.id) ? prev : [...prev, current.id]));
+      trackEvent('unscramble_check', {
+        set_id: studySet.id,
+        result: 'correct',
+        index,
+      });
+      trackEvent('unscramble_puzzle_complete', {
+        set_id: studySet.id,
+        index,
+      });
       const gsap = initGSAP();
       const nodes = tokens.map((token) => tokenRefs.current[token.id]).filter(Boolean);
       if (nodes.length) {
@@ -342,6 +361,11 @@ export function UnscrambleGame({ studySet, data }: GameComponentProps) {
     }
 
     setFeedback({ kind: 'wrong', message: 'Not quite. Drag letters to reorder them and try again.' });
+    trackEvent('unscramble_check', {
+      set_id: studySet.id,
+      result: 'wrong',
+      index,
+    });
     if (rowRef.current) {
       const gsap = initGSAP();
       gsap.fromTo(rowRef.current, { x: 0 }, { x: 6, yoyo: true, repeat: 3, duration: 0.05, ease: 'power1.inOut' });
@@ -351,6 +375,22 @@ export function UnscrambleGame({ studySet, data }: GameComponentProps) {
   const goNext = () => {
     setIndex((prev) => prev + 1);
   };
+
+  useEffect(() => {
+    if (!completed || gameCompletionTrackedRef.current) return;
+    gameCompletionTrackedRef.current = true;
+    trackEvent('unscramble_game_complete', {
+      set_id: studySet.id,
+      total_count: puzzles.length,
+      score: solvedIds.length,
+    });
+    trackEvent('game_session_complete', {
+      set_id: studySet.id,
+      game_type: 'unscramble',
+      result: 'complete',
+      score: solvedIds.length,
+    });
+  }, [completed, puzzles.length, solvedIds.length, studySet.id, trackEvent]);
 
   if (!puzzles.length) {
     return (

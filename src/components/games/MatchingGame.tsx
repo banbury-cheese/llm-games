@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Card } from '@/components/ui/Card';
 import { initGSAP } from '@/lib/gsap';
 import type { Term } from '@/types/study-set';
@@ -56,6 +57,7 @@ function normalizePairs(data: unknown, fallbackTerms: Term[]): Pair[] {
 }
 
 export function MatchingGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const pairs = useMemo(() => normalizePairs(data, studySet.terms), [data, studySet.terms]);
   const leftItems = useMemo(() => shuffle(pairs.map((pair) => ({ id: pair.id, label: pair.term }))), [pairs]);
   const rightItems = useMemo(() => shuffle(pairs.map((pair) => ({ id: pair.id, label: pair.definition }))), [pairs]);
@@ -71,6 +73,7 @@ export function MatchingGame({ studySet, data }: GameComponentProps) {
   const leftRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const rightRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const previousMatchedRef = useRef(0);
+  const completionTrackedRef = useRef(false);
 
   const complete = matchedIds.length === pairs.length && pairs.length > 0;
 
@@ -103,6 +106,11 @@ export function MatchingGame({ studySet, data }: GameComponentProps) {
         animateSelection([leftId], 'success');
       }
       setStatus('Nice match. Keep going.');
+      trackEvent('matching_attempt', {
+        set_id: studySet.id,
+        result: 'correct',
+        attempts: attempts + 1,
+      });
       window.setTimeout(() => {
         setSelectedLeftId(null);
         setSelectedRightId(null);
@@ -112,11 +120,32 @@ export function MatchingGame({ studySet, data }: GameComponentProps) {
 
     animateSelection([leftId, rightId], 'error');
     setStatus('That pair does not match. Try again.');
+    trackEvent('matching_attempt', {
+      set_id: studySet.id,
+      result: 'wrong',
+      attempts: attempts + 1,
+    });
     window.setTimeout(() => {
       setSelectedLeftId(null);
       setSelectedRightId(null);
     }, 320);
   };
+
+  useEffect(() => {
+    if (!complete || completionTrackedRef.current) return;
+    completionTrackedRef.current = true;
+    trackEvent('matching_complete', {
+      set_id: studySet.id,
+      attempts,
+      total_count: pairs.length,
+    });
+    trackEvent('game_session_complete', {
+      set_id: studySet.id,
+      game_type: 'matching',
+      attempts,
+      result: 'complete',
+    });
+  }, [complete, attempts, pairs.length, studySet.id, trackEvent]);
 
   const handleLeftSelect = (id: string) => {
     if (matchedIds.includes(id)) return;

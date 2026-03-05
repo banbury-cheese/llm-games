@@ -1,7 +1,8 @@
 'use client';
 
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import type { Term } from '@/types/study-set';
@@ -249,6 +250,7 @@ function ControlStrip({
 }
 
 export function StudyTableGame({ studySet, data }: GameComponentProps) {
+  const { trackEvent } = useAnalytics();
   const rows = useMemo(() => normalizeRows(data, studySet.terms), [data, studySet.terms]);
 
   const [query, setQuery] = useState('');
@@ -262,6 +264,7 @@ export function StudyTableGame({ studySet, data }: GameComponentProps) {
     'Tap any visible cell to hide it. Tap any accent "show" cell to reveal it.',
   );
   const [revealState, setRevealState] = useState<RevealState>({});
+  const completionTrackedRef = useRef(false);
 
   useEffect(() => {
     setRevealState((prev) => mergeRevealState(rows, prev));
@@ -308,6 +311,10 @@ export function StudyTableGame({ studySet, data }: GameComponentProps) {
   const setAllVisible = (visible: boolean) => {
     setRevealState(applyAllVisibility(rows, visible));
     setStatus(visible ? 'All cells revealed.' : 'All cells hidden. Use “show” to reveal one at a time.');
+    trackEvent('studytable_column_toggle', {
+      set_id: studySet.id,
+      action: visible ? 'show_all' : 'hide_all',
+    });
   };
 
   const setColumnVisible = (column: CellKey, visible: boolean) => {
@@ -320,6 +327,11 @@ export function StudyTableGame({ studySet, data }: GameComponentProps) {
       return next;
     });
     setStatus(`${column === 'term' ? 'Term' : 'Definition'} column ${visible ? 'shown' : 'hidden'}.`);
+    trackEvent('studytable_column_toggle', {
+      set_id: studySet.id,
+      action: visible ? 'show' : 'hide',
+      direction: column,
+    });
   };
 
   const applyRandomRevealPattern = (targetRows: Row[]) => {
@@ -339,6 +351,7 @@ export function StudyTableGame({ studySet, data }: GameComponentProps) {
     setUseShuffledOrder(true);
     applyRandomRevealPattern(target);
     setStatus('Rows shuffled and reveal pattern randomized.');
+    trackEvent('studytable_shuffle', { set_id: studySet.id });
   };
 
   const handleResetPattern = () => {
@@ -346,6 +359,7 @@ export function StudyTableGame({ studySet, data }: GameComponentProps) {
     const patch = buildAlternatingReveal(basis.length ? basis : rows);
     setRevealState((prev) => ({ ...prev, ...patch }));
     setStatus('Alternating reveal pattern restored.');
+    trackEvent('studytable_reset_pattern', { set_id: studySet.id });
   };
 
   const toggleSort = (key: SortKey) => {
@@ -371,7 +385,41 @@ export function StudyTableGame({ studySet, data }: GameComponentProps) {
         },
       };
     });
+    trackEvent('studytable_cell_toggle', {
+      set_id: studySet.id,
+      direction: column,
+      mode: rowId,
+    });
   };
+
+  const toggleHelp = () => {
+    setShowHelp((prev) => {
+      const next = !prev;
+      trackEvent('studytable_help_toggle', {
+        set_id: studySet.id,
+        result: next ? 'open' : 'close',
+      });
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (query.trim().length < 2) return;
+    trackEvent('studytable_search', {
+      set_id: studySet.id,
+      item_count: displayRows.length,
+    });
+  }, [query, displayRows.length, studySet.id, trackEvent]);
+
+  useEffect(() => {
+    if (!totalCellCount || visibleCount !== totalCellCount || completionTrackedRef.current) return;
+    completionTrackedRef.current = true;
+    trackEvent('game_session_complete', {
+      set_id: studySet.id,
+      game_type: 'study-table',
+      result: 'complete',
+    });
+  }, [totalCellCount, visibleCount, studySet.id, trackEvent]);
 
   if (!rows.length) {
     return (
@@ -472,7 +520,7 @@ export function StudyTableGame({ studySet, data }: GameComponentProps) {
             onShowAll={() => setAllVisible(true)}
             onShuffle={handleShuffle}
             onResetPattern={handleResetPattern}
-            onToggleHelp={() => setShowHelp((prev) => !prev)}
+            onToggleHelp={toggleHelp}
             helpOpen={showHelp}
           />
 
@@ -594,7 +642,7 @@ export function StudyTableGame({ studySet, data }: GameComponentProps) {
               onShowAll={() => setAllVisible(true)}
               onShuffle={handleShuffle}
               onResetPattern={handleResetPattern}
-              onToggleHelp={() => setShowHelp((prev) => !prev)}
+              onToggleHelp={toggleHelp}
               helpOpen={showHelp}
               compact
             />
