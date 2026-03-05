@@ -1,3 +1,11 @@
+import {
+  createDefaultDeckPersonalizationState,
+  ensureDeckPersonalizationState,
+  incrementPersonalizationSession,
+  recordAttemptEvent,
+  resetDeckProgress,
+} from '@/lib/personalization';
+import type { DeckPersonalizationState, PersonalizationAttemptEvent } from '@/types/personalization';
 import type { StudySet } from '@/types/study-set';
 import { DEFAULT_AI_SETTINGS, STUDY_LIMITS, type AISettings } from '@/types/settings';
 
@@ -53,6 +61,13 @@ function sanitizeAISettings(input: Partial<AISettings>): AISettings {
   };
 }
 
+function hydrateStudySet(raw: StudySet) {
+  return {
+    ...raw,
+    personalization: ensureDeckPersonalizationState(raw, { forLegacy: !raw.personalization }),
+  } satisfies StudySet;
+}
+
 export const storage = {
   readJSON,
   writeJSON,
@@ -65,7 +80,9 @@ export const storage = {
 export const studySetStore = {
   list(): StudySet[] {
     const sets = readJSON<StudySet[]>(STORAGE_KEYS.studySets, []);
-    return [...sets].sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
+    return [...sets]
+      .map((set) => hydrateStudySet(set))
+      .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
   },
   get(id: string): StudySet | null {
     return this.list().find((set) => set.id === id) ?? null;
@@ -76,15 +93,16 @@ export const studySetStore = {
   upsert(nextSet: StudySet) {
     const current = this.list();
     const idx = current.findIndex((set) => set.id === nextSet.id);
+    const hydrated = hydrateStudySet(nextSet);
 
     if (idx >= 0) {
-      current[idx] = { ...current[idx], ...nextSet, updatedAt: Date.now() };
+      current[idx] = { ...current[idx], ...hydrated, updatedAt: Date.now() };
     } else {
-      current.unshift(nextSet);
+      current.unshift(hydrated);
     }
 
     this.saveAll(current);
-    return nextSet;
+    return hydrated;
   },
   delete(id: string) {
     const next = this.list().filter((set) => set.id !== id);
@@ -134,6 +152,60 @@ export const studySetStore = {
 
     this.upsert(updated);
     return updated;
+  },
+  updatePersonalizationState(id: string, patch: Partial<Pick<DeckPersonalizationState, 'enabled' | 'targetRate'>>) {
+    const set = this.get(id);
+    if (!set) return null;
+
+    const nextState = ensureDeckPersonalizationState(set, { forLegacy: !set.personalization });
+    const updated: StudySet = {
+      ...set,
+      personalization: {
+        ...nextState,
+        enabled: typeof patch.enabled === 'boolean' ? patch.enabled : nextState.enabled,
+        targetRate: typeof patch.targetRate === 'number' ? patch.targetRate : nextState.targetRate,
+        updatedAt: Date.now(),
+      },
+      updatedAt: Date.now(),
+    };
+    this.upsert(updated);
+    return updated;
+  },
+  resetPersonalizationState(id: string) {
+    const set = this.get(id);
+    if (!set) return null;
+    const updated: StudySet = {
+      ...set,
+      personalization: resetDeckProgress(set, { keepConfig: true }),
+      updatedAt: Date.now(),
+    };
+    this.upsert(updated);
+    return updated;
+  },
+  incrementPersonalizationSession(id: string) {
+    const set = this.get(id);
+    if (!set) return null;
+    const updated: StudySet = {
+      ...set,
+      personalization: incrementPersonalizationSession(set),
+      updatedAt: Date.now(),
+    };
+    this.upsert(updated);
+    return updated;
+  },
+  recordPersonalizationAttempt(id: string, event: PersonalizationAttemptEvent) {
+    const set = this.get(id);
+    if (!set) return null;
+    const updated: StudySet = {
+      ...set,
+      personalization: recordAttemptEvent(set, event),
+      updatedAt: Date.now(),
+    };
+    this.upsert(updated);
+    return updated;
+  },
+  createDefaultPersonalizationState(enabled = true) {
+    return createDefaultDeckPersonalizationState({ enabled });
   },
 };
 

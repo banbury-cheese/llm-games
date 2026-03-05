@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter_Tight } from 'next/font/google';
+import { Suspense } from 'react';
 
 import { Nav } from '@/components/layout/Nav';
 import { PageTransition } from '@/components/layout/PageTransition';
@@ -32,30 +33,32 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </head>
       <body className={interTight.variable}>
         <ThemeProvider>
-          <AnalyticsProvider>
-            <ChatTutorProvider>
-              <div className="app-shell">
-                <Nav />
-                <div className="flex-1">
-                  <PageTransition>
-                    <main className="page-shell">{children}</main>
-                  </PageTransition>
+          <Suspense fallback={null}>
+            <AnalyticsProvider>
+              <ChatTutorProvider>
+                <div className="app-shell">
+                  <Nav />
+                  <div className="flex-1">
+                    <PageTransition>
+                      <main className="page-shell">{children}</main>
+                    </PageTransition>
+                  </div>
+                  <footer className="pb-2 pt-1 text-center text-xs text-[var(--text-muted)]">
+                    Built by{' '}
+                    <a
+                      href="https://itskay.co/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-semibold underline decoration-current/40 underline-offset-2 transition hover:text-[var(--text)]"
+                    >
+                      itskay.co
+                    </a>
+                  </footer>
                 </div>
-                <footer className="pb-2 pt-1 text-center text-xs text-[var(--text-muted)]">
-                  Built by{' '}
-                  <a
-                    href="https://itskay.co/"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold underline decoration-current/40 underline-offset-2 transition hover:text-[var(--text)]"
-                  >
-                    itskay.co
-                  </a>
-                </footer>
-              </div>
-            </ChatTutorProvider>
-            <ConsentBanner />
-          </AnalyticsProvider>
+              </ChatTutorProvider>
+              <ConsentBanner />
+            </AnalyticsProvider>
+          </Suspense>
         </ThemeProvider>
       </body>
     </html>

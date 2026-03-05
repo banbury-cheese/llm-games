@@ -89,6 +89,8 @@ export const ANALYTICS_EVENT_NAMES = [
   'test_restart',
   'api_request_start',
   'api_request_result',
+  'personalization_setting_change',
+  'personalized_pack_refresh',
 ] as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
@@ -136,6 +138,7 @@ const ALLOWED_PARAM_KEYS = new Set([
   'total_count',
   'elapsed_ms',
   'file_size_bucket',
+  'value',
 ]);
 
 const BLOCKED_KEYS = new Set([

@@ -3,11 +3,14 @@ import { NextResponse } from 'next/server';
 import type { z } from 'zod';
 
 import { getAnalyticsHeaders, trackServerApiRequest } from '@/lib/analytics/server';
-import { buildGamePrompt, buildTermExtractionPrompt } from '@/lib/ai/prompts';
+import { buildGamePrompt, buildPersonalizedPackPrompt, buildTermExtractionPrompt } from '@/lib/ai/prompts';
 import { getLanguageModel } from '@/lib/ai/providers';
 import {
+  typeInGameSchema,
   gameSchemaByType,
   generateRouteSchema,
+  personalizedPackGameTypeSchema,
+  personalizedPackSchemaByType,
   termExtractionSchema,
   type TermExtractionResult,
 } from '@/lib/ai/schemas';
@@ -20,6 +23,20 @@ function dedupeTerms(terms: TermExtractionResult['terms']) {
     const key = item.term.trim().toLowerCase();
     if (seen.has(key)) return false;
     seen.add(key);
+    return true;
+  });
+}
+
+function dedupeTargetTerms(terms: Array<{ id: string; term: string; definition: string }>) {
+  const seenIds = new Set<string>();
+  const seenTerms = new Set<string>();
+  return terms.filter((item) => {
+    const id = item.id.trim();
+    const termKey = item.term.trim().toLowerCase();
+    if (!id || !termKey) return false;
+    if (seenIds.has(id) || seenTerms.has(termKey)) return false;
+    seenIds.add(id);
+    seenTerms.add(termKey);
     return true;
   });
 }
@@ -115,9 +132,61 @@ function localFallbackGameData(gameType: GameType, terms: Array<{ term: string; 
       });
       return { title: 'Quick Quiz', questions };
     }
+    case GameType.TypeIn:
+      return {
+        items: terms.slice(0, 24).map((term, index) => ({
+          id: `${index + 1}`,
+          answer: term.term,
+          clue: term.definition,
+        })),
+        note: 'Local type-in data.',
+      };
     default:
       return { items: [] };
   }
+}
+
+function localFallbackPersonalizedPack(
+  gameType: GameType.Quiz | GameType.TypeIn,
+  terms: Array<{ id: string; term: string; definition: string }>,
+) {
+  if (gameType === GameType.Quiz) {
+    const selected = terms.slice(0, 24);
+    const questions = selected.map((term, index) => {
+      const otherTerms = selected.filter((_, i) => i !== index).map((t) => t.term);
+      const distractors = otherTerms.slice(0, 3);
+      while (distractors.length < 3) distractors.push(`Not ${term.term}`);
+      const options = [...distractors, term.term].sort(() => Math.random() - 0.5);
+      return {
+        id: `${index + 1}`,
+        termId: term.id,
+        prompt: `Which term best matches this definition: ${term.definition}`,
+        options,
+        correctIndex: options.findIndex((option) => option === term.term),
+        explanation: `${term.term}: ${term.definition}`,
+      };
+    });
+    return {
+      title: 'Personalized Quiz Pack',
+      questions,
+      packVersion: 'v1',
+      generatedAt: Date.now(),
+    };
+  }
+
+  const base = typeInGameSchema.parse({
+    items: terms.slice(0, 40).map((term) => ({
+      id: term.id,
+      answer: term.term,
+      clue: term.definition,
+    })),
+    note: 'Local personalized type-in pack.',
+  });
+  return {
+    ...base,
+    packVersion: 'v1',
+    generatedAt: Date.now(),
+  };
 }
 
 export async function POST(request: Request) {
@@ -234,6 +303,95 @@ export async function POST(request: Request) {
       }
     }
 
+    if (mode === 'personalized-pack') {
+      const gameTypeParsed = personalizedPackGameTypeSchema.safeParse(parsed.data.gameType);
+      const targetTerms = parsed.data.targetTerms;
+
+      if (!gameTypeParsed.success || !targetTerms?.length) {
+        await trackServerApiRequest({
+          clientId: analytics.clientId,
+          consent: analytics.consent,
+          apiRoute: '/api/generate',
+          apiMode: mode,
+          provider: settings.provider,
+          result: 'error',
+          statusCode: 400,
+          durationMs: Date.now() - startedAt,
+          errorCode: 'invalid_personalized_pack_request',
+        });
+        return NextResponse.json(
+          { error: 'gameType (quiz/type-in) and targetTerms are required for personalized packs.' },
+          { status: 400 },
+        );
+      }
+
+      const gameType = gameTypeParsed.data;
+      const dedupedTerms = dedupeTargetTerms(targetTerms).slice(0, maxTermsPerDeck);
+      const schema = personalizedPackSchemaByType[gameType];
+      const promptData = buildPersonalizedPackPrompt({
+        gameType,
+        targetTerms: dedupedTerms,
+        weakTermIds: parsed.data.weakTermIds,
+        tutorInstruction: parsed.data.tutorInstruction,
+      });
+      const model = getLanguageModel(settings);
+
+      try {
+        const result = await generateObjectCompat({
+          provider: settings.provider,
+          model,
+          schema,
+          system: promptData.system,
+          prompt: promptData.prompt,
+          anthropicJsonShape:
+            gameType === GameType.Quiz
+              ? '{"title":"string","questions":[{"id":"string","termId":"string","prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}]}'
+              : '{"items":[{"id":"string","answer":"string","clue":"string","hint":"string"}],"note":"string"}',
+        });
+
+        const response = NextResponse.json({
+          gameType,
+          data: {
+            ...result,
+            packVersion: 'v1',
+            generatedAt: Date.now(),
+          },
+          source: 'llm',
+        });
+        await trackServerApiRequest({
+          clientId: analytics.clientId,
+          consent: analytics.consent,
+          apiRoute: '/api/generate',
+          apiMode: mode,
+          provider: settings.provider,
+          result: 'success',
+          statusCode: response.status,
+          durationMs: Date.now() - startedAt,
+          extra: { game_type: gameType, source: 'llm' },
+        });
+        return response;
+      } catch (error) {
+        const response = NextResponse.json({
+          gameType,
+          data: localFallbackPersonalizedPack(gameType, dedupedTerms),
+          source: 'fallback',
+          warning: error instanceof Error ? error.message : 'LLM personalized pack generation failed.',
+        });
+        await trackServerApiRequest({
+          clientId: analytics.clientId,
+          consent: analytics.consent,
+          apiRoute: '/api/generate',
+          apiMode: mode,
+          provider: settings.provider,
+          result: 'success',
+          statusCode: response.status,
+          durationMs: Date.now() - startedAt,
+          extra: { game_type: gameType, source: 'fallback' },
+        });
+        return response;
+      }
+    }
+
     if (!parsed.data.gameType || !parsed.data.terms?.length) {
       await trackServerApiRequest({
         clientId: analytics.clientId,
@@ -270,7 +428,9 @@ export async function POST(request: Request) {
             ? '{"title":"string","questions":[{"id":"string","prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}]}'
             : gameType === GameType.Matching
               ? '{"instructions":"string","pairs":[{"id":"string","term":"string","definition":"string"}]}'
-              : '{"items":[],"note":"string"}',
+              : gameType === GameType.TypeIn
+                ? '{"items":[{"id":"string","answer":"string","clue":"string"}],"note":"string"}'
+                : '{"items":[],"note":"string"}',
       });
 
       const response = NextResponse.json({ gameType, data: result, source: 'llm' });

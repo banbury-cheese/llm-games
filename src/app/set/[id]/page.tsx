@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { initGSAP } from '@/lib/gsap';
+import { createDeckPersonalizationSummary } from '@/lib/personalization';
 import { studySetStore } from '@/lib/storage';
 import { GAME_CATALOG } from '@/types/game';
 import type { StudySet } from '@/types/study-set';
@@ -52,6 +53,7 @@ export default function SetPage() {
     () => ({
       terms: studySet?.terms.length ?? 0,
       cachedGames: studySet ? Object.keys(studySet.gameData ?? {}).length : 0,
+      personalization: studySet ? createDeckPersonalizationSummary(studySet) : null,
     }),
     [studySet],
   );
@@ -78,6 +80,40 @@ export default function SetPage() {
     studySetStore.delete(pendingDelete.id);
     setPendingDelete(null);
     router.push('/');
+  };
+
+  const setPersonalizationEnabled = (enabled: boolean) => {
+    if (!studySet) return;
+    const updated = studySetStore.updatePersonalizationState(studySet.id, { enabled });
+    if (!updated) return;
+    setStudySet(updated);
+    trackEvent('personalization_setting_change', {
+      set_id: studySet.id,
+      action: enabled ? 'enable' : 'disable',
+    });
+  };
+
+  const setTargetRate = (targetRate: number) => {
+    if (!studySet) return;
+    const updated = studySetStore.updatePersonalizationState(studySet.id, { targetRate });
+    if (!updated) return;
+    setStudySet(updated);
+    trackEvent('personalization_setting_change', {
+      set_id: studySet.id,
+      action: 'target_rate',
+      value: Math.round(targetRate * 100),
+    });
+  };
+
+  const resetPersonalization = () => {
+    if (!studySet) return;
+    const updated = studySetStore.resetPersonalizationState(studySet.id);
+    if (!updated) return;
+    setStudySet(updated);
+    trackEvent('personalization_setting_change', {
+      set_id: studySet.id,
+      action: 'reset_progress',
+    });
   };
 
   if (loading) {
@@ -169,6 +205,76 @@ export default function SetPage() {
               Dashboard
             </Button>
           </div>
+        </div>
+      </Card>
+
+      <Card className="rounded-[30px] p-5 sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <p className="inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]" style={{ borderColor: 'var(--border)' }}>
+              Personalization
+            </p>
+            <h2 className="text-lg font-semibold sm:text-xl">Adaptive targeting for this deck</h2>
+            <p className="max-w-3xl text-sm leading-6 text-[var(--text-muted)]">
+              Mastery-first personalization surfaces weaker terms more often and uses Tutor Focus as a tie-break.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="rounded-full border px-3 py-2 font-semibold" style={{ borderColor: 'var(--border)' }}>
+              Weak terms: {stats.personalization?.weakCount ?? 0}
+            </span>
+            <span className="rounded-full border px-3 py-2 font-semibold" style={{ borderColor: 'var(--border)' }}>
+              Mastered: {stats.personalization?.masteredCount ?? 0}
+            </span>
+            <span className="rounded-full bg-sky px-3 py-2 font-semibold text-black">
+              Adaptivity: {Math.round((stats.personalization?.targetRate ?? 0.4) * 100)}%
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto]">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant={stats.personalization?.enabled ? 'secondary' : 'ghost'}
+              onClick={() => setPersonalizationEnabled(true)}
+            >
+              Personalization On
+            </Button>
+            <Button
+              type="button"
+              variant={!stats.personalization?.enabled ? 'secondary' : 'ghost'}
+              onClick={() => setPersonalizationEnabled(false)}
+            >
+              Personalization Off
+            </Button>
+          </div>
+
+          <Button type="button" variant="ghost" onClick={resetPersonalization}>
+            Reset Progress
+          </Button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {[
+            { label: '20%', rate: 0.2 },
+            { label: '40%', rate: 0.4 },
+            { label: '70%', rate: 0.7 },
+          ].map((option) => {
+            const active = Math.abs((stats.personalization?.targetRate ?? 0.4) - option.rate) < 0.001;
+            return (
+              <Button
+                key={option.label}
+                type="button"
+                size="sm"
+                variant={active ? 'secondary' : 'ghost'}
+                onClick={() => setTargetRate(option.rate)}
+              >
+                {option.label}
+              </Button>
+            );
+          })}
         </div>
       </Card>
 

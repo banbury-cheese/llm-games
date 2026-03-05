@@ -6,6 +6,7 @@ import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { initGSAP } from '@/lib/gsap';
+import { studySetStore } from '@/lib/storage';
 import type { Term } from '@/types/study-set';
 
 import type { GameComponentProps } from '@/components/games/types';
@@ -234,6 +235,7 @@ export function FlashcardsGame({ studySet, data }: GameComponentProps) {
   const previousActiveIdRef = useRef<string | null>(null);
   const entryFromPileRef = useRef<PileKind | null>(null);
   const exitDelayTimeoutRef = useRef<number | null>(null);
+  const currentCardShownAtRef = useRef<number>(Date.now());
   const flipTrackedRef = useRef(false);
   const completionTrackedRef = useRef(false);
 
@@ -258,6 +260,7 @@ export function FlashcardsGame({ studySet, data }: GameComponentProps) {
     previousActiveIdRef.current = null;
     entryFromPileRef.current = null;
     completionTrackedRef.current = false;
+    currentCardShownAtRef.current = Date.now();
   }, [allIds]);
 
   useEffect(() => {
@@ -323,6 +326,7 @@ export function FlashcardsGame({ studySet, data }: GameComponentProps) {
   useEffect(() => {
     const node = cardShellRef.current;
     if (!node || !currentCardId) return;
+    currentCardShownAtRef.current = Date.now();
 
     const gsap = initGSAP();
     const card3dNode = card3dRef.current;
@@ -558,6 +562,7 @@ export function FlashcardsGame({ studySet, data }: GameComponentProps) {
 
   const classifyCurrentCard = (target: 'know' | 'dontKnow') => {
     if (animating || !currentCardId) return;
+    const responseMs = Date.now() - currentCardShownAtRef.current;
 
     const willHaveNextCard = remainingIds.length > 1;
     animateCardOut(target, () => {
@@ -583,6 +588,11 @@ export function FlashcardsGame({ studySet, data }: GameComponentProps) {
     trackEvent('flashcards_classify', {
       set_id: studySet.id,
       result: target === 'know' ? 'know' : 'dont_know',
+    });
+    studySetStore.recordPersonalizationAttempt(studySet.id, {
+      termId: currentCardId,
+      result: target === 'know' ? 'correct' : 'wrong',
+      responseMs,
     });
   };
 

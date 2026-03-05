@@ -2,10 +2,17 @@ import { GameType, GAME_LABELS } from '@/types/game';
 import type { Term } from '@/types/study-set';
 
 type PromptTerm = Pick<Term, 'term' | 'definition'>;
+type PromptTargetTerm = Pick<Term, 'id' | 'term' | 'definition'>;
 
 function termsBlock(terms: PromptTerm[]) {
   return terms
     .map((term, index) => `${index + 1}. ${term.term}: ${term.definition}`)
+    .join('\n');
+}
+
+function targetTermsBlock(terms: PromptTargetTerm[]) {
+  return terms
+    .map((term, index) => `${index + 1}. [${term.id}] ${term.term}: ${term.definition}`)
     .join('\n');
 }
 
@@ -48,6 +55,51 @@ export function buildGamePrompt(gameType: GameType, terms: PromptTerm[]) {
     prompt:
       promptByGame[gameType] ??
       `Create structured starter data for the ${label} learning game using the study set below.\n\n${base}`,
+  };
+}
+
+export function buildPersonalizedPackPrompt(input: {
+  gameType: GameType.Quiz | GameType.TypeIn;
+  targetTerms: PromptTargetTerm[];
+  weakTermIds?: string[];
+  tutorInstruction?: string;
+}) {
+  const base = `Target terms:\n${targetTermsBlock(input.targetTerms)}`;
+  const tutorInstruction = input.tutorInstruction?.trim();
+
+  if (input.gameType === GameType.Quiz) {
+    return {
+      system:
+        'You generate adaptive quiz question packs. Output strict JSON that matches schema exactly. No markdown.',
+      prompt: [
+        'Create a personalized quiz pack with 16-30 multiple-choice questions.',
+        'Prioritize weak terms and include plausible distractors.',
+        'Each question must include: id, termId, prompt, options(4), correctIndex, explanation.',
+        'Use termId as the exact bracketed id from the target terms list (e.g., "term-123").',
+        tutorInstruction ? `Tutor focus to prioritize when selecting examples: ${tutorInstruction}` : null,
+        input.weakTermIds?.length
+          ? `Weak term ids from client signal: ${input.weakTermIds.join(', ')}`
+          : null,
+        base,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+    };
+  }
+
+  return {
+    system:
+      'You generate adaptive type-in practice packs. Output strict JSON that matches schema exactly. No markdown.',
+    prompt: [
+      'Create a personalized type-in pack with 16-40 items.',
+      'Each item must include: id, answer, clue. Optional hint is allowed.',
+      'Prioritize weak terms and vary clue wording to deepen understanding.',
+      tutorInstruction ? `Tutor focus to prioritize when writing clues: ${tutorInstruction}` : null,
+      input.weakTermIds?.length ? `Weak term ids from client signal: ${input.weakTermIds.join(', ')}` : null,
+      base,
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
   };
 }
 

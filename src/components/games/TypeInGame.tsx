@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { initGSAP } from '@/lib/gsap';
+import { studySetStore } from '@/lib/storage';
 import type { Term } from '@/types/study-set';
 
 import type { GameComponentProps } from '@/components/games/types';
@@ -95,6 +96,7 @@ export function TypeInGame({ studySet, data }: GameComponentProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const feedbackRef = useRef<HTMLDivElement>(null);
   const completionTrackedRef = useRef(false);
+  const itemShownAtRef = useRef<number>(Date.now());
   const currentItem = items[index];
   const currentItemId = currentItem?.id ?? null;
 
@@ -122,6 +124,7 @@ export function TypeInGame({ studySet, data }: GameComponentProps) {
 
   useEffect(() => {
     if (!currentItem) return;
+    itemShownAtRef.current = Date.now();
     const previous = attempts[currentItem.id];
     setInputValue(previous?.answer ?? '');
     setSubmittedScore(previous?.score ?? null);
@@ -201,6 +204,8 @@ export function TypeInGame({ studySet, data }: GameComponentProps) {
   const submitAnswer = () => {
     if (!currentItem) return;
     const score = fuzzyScore(inputValue, currentItem.answer);
+    const responseMs = Date.now() - itemShownAtRef.current;
+    const result: 'correct' | 'partial' | 'wrong' = score >= 0.95 ? 'correct' : score >= 0.75 ? 'partial' : 'wrong';
     setAttempts((prev) => ({
       ...prev,
       [currentItem.id]: {
@@ -209,6 +214,11 @@ export function TypeInGame({ studySet, data }: GameComponentProps) {
       },
     }));
     setSubmittedScore(score);
+    studySetStore.recordPersonalizationAttempt(studySet.id, {
+      termId: currentItem.id,
+      result,
+      responseMs,
+    });
     trackEvent('typein_submit', {
       set_id: studySet.id,
       score: Math.round(score * 100),

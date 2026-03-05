@@ -1,5 +1,5 @@
 import { aiSettingsStore, studySetStore } from '@/lib/storage';
-import { getAnalyticsRequestHeaders } from '@/lib/analytics/session';
+import { computeTermPriority, selectPersonalizedTerms } from '@/lib/personalization';
 import { GameType } from '@/types/game';
 import type { StudySet, Term } from '@/types/study-set';
 
@@ -17,6 +17,59 @@ function shuffle<T>(items: T[]) {
 function sampleUpTo<T>(items: T[], maxItems: number) {
   if (items.length <= maxItems) return [...items];
   return shuffle(items).slice(0, maxItems);
+}
+
+function normalizeText(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getGameRoundLimit(gameType: GameType, maxItems: number) {
+  switch (gameType) {
+    case GameType.Quiz:
+      return Math.min(maxItems, 10);
+    case GameType.Matching:
+      return Math.min(maxItems, 8);
+    case GameType.TypeIn:
+      return Math.min(maxItems, 20);
+    default:
+      return maxItems;
+  }
+}
+
+function buildTermLookup(studySet: StudySet) {
+  const byId = new Map(studySet.terms.map((term) => [term.id, term]));
+  const byTerm = new Map(studySet.terms.map((term) => [normalizeText(term.term), term]));
+  const byDefinition = new Map(studySet.terms.map((term) => [normalizeText(term.definition), term]));
+  return { byId, byTerm, byDefinition };
+}
+
+function resolveTermIdFromFields(
+  lookup: ReturnType<typeof buildTermLookup>,
+  explicitId: string | undefined,
+  ...fields: Array<string | undefined>
+) {
+  if (explicitId) {
+    const exact = lookup.byId.get(explicitId);
+    if (exact) return exact.id;
+  }
+
+  for (const value of fields) {
+    if (!value) continue;
+    const normalized = normalizeText(value);
+    if (!normalized) continue;
+    const byTerm = lookup.byTerm.get(normalized);
+    if (byTerm) return byTerm.id;
+    const byDefinition = lookup.byDefinition.get(normalized);
+    if (byDefinition) return byDefinition.id;
+  }
+
+  return null;
 }
 
 function getGenerationLimits() {
@@ -45,6 +98,159 @@ function capGameDataCollections(data: unknown, maxItems: number) {
   return changed ? next : data;
 }
 
+function selectRecordsByPersonalization<T>(
+  records: T[],
+  maxItems: number,
+  studySet: StudySet,
+  resolveTermId: (record: T) => string | null,
+) {
+  if (records.length <= maxItems) return [...records];
+
+  const candidateTermIds = new Set<string>();
+  records.forEach((record) => {
+    const termId = resolveTermId(record);
+    if (termId) candidateTermIds.add(termId);
+  });
+
+  const candidateTerms = studySet.terms.filter((term) => candidateTermIds.has(term.id));
+  if (!candidateTerms.length) {
+    return sampleUpTo(records, maxItems);
+  }
+
+  const selection = selectPersonalizedTerms({
+    studySet,
+    terms: candidateTerms,
+    maxItems: Math.min(maxItems, candidateTerms.length),
+  });
+
+  const targetSet = new Set(selection.targetedIds);
+  const targetedRecords = records.filter((record) => {
+    const termId = resolveTermId(record);
+    return termId ? targetSet.has(termId) : false;
+  });
+  const targetedRecordSet = new Set(targetedRecords);
+  const remainingRecords = records.filter((record) => !targetedRecordSet.has(record));
+
+  return [...shuffle(targetedRecords), ...shuffle(remainingRecords)].slice(0, maxItems);
+}
+
+function capCoreGameData(gameType: GameType, data: unknown, studySet: StudySet, maxItems: number) {
+  const roundLimit = getGameRoundLimit(gameType, maxItems);
+  if (!data || typeof data !== 'object') return data;
+
+  const next = { ...(data as Record<string, unknown>) };
+  const lookup = buildTermLookup(studySet);
+
+  if (gameType === GameType.Flashcards && Array.isArray(next.cards)) {
+    next.cards = selectRecordsByPersonalization(
+      next.cards,
+      roundLimit,
+      studySet,
+      (record) => {
+        if (!record || typeof record !== 'object') return null;
+        const item = record as { id?: unknown; term?: unknown; definition?: unknown };
+        return resolveTermIdFromFields(
+          lookup,
+          typeof item.id === 'string' ? item.id : undefined,
+          typeof item.term === 'string' ? item.term : undefined,
+          typeof item.definition === 'string' ? item.definition : undefined,
+        );
+      },
+    );
+    return next;
+  }
+
+  if (gameType === GameType.Matching && Array.isArray(next.pairs)) {
+    next.pairs = selectRecordsByPersonalization(
+      next.pairs,
+      roundLimit,
+      studySet,
+      (record) => {
+        if (!record || typeof record !== 'object') return null;
+        const item = record as { id?: unknown; term?: unknown; definition?: unknown };
+        return resolveTermIdFromFields(
+          lookup,
+          typeof item.id === 'string' ? item.id : undefined,
+          typeof item.term === 'string' ? item.term : undefined,
+          typeof item.definition === 'string' ? item.definition : undefined,
+        );
+      },
+    );
+    return next;
+  }
+
+  if (gameType === GameType.TypeIn && Array.isArray(next.items)) {
+    next.items = selectRecordsByPersonalization(
+      next.items,
+      roundLimit,
+      studySet,
+      (record) => {
+        if (!record || typeof record !== 'object') return null;
+        const item = record as { id?: unknown; answer?: unknown; term?: unknown; clue?: unknown; definition?: unknown };
+        return resolveTermIdFromFields(
+          lookup,
+          typeof item.id === 'string' ? item.id : undefined,
+          typeof item.answer === 'string' ? item.answer : undefined,
+          typeof item.term === 'string' ? item.term : undefined,
+          typeof item.clue === 'string' ? item.clue : undefined,
+          typeof item.definition === 'string' ? item.definition : undefined,
+        );
+      },
+    );
+    return next;
+  }
+
+  if (gameType === GameType.Quiz && Array.isArray(next.questions)) {
+    if (!studySet.personalization?.enabled) {
+      next.questions = sampleUpTo(shuffle(next.questions), roundLimit);
+      return next;
+    }
+
+    const snapshots = new Map(computeTermPriority(studySet).map((snapshot) => [snapshot.termId, snapshot]));
+    const scored = shuffle(next.questions).map((question) => {
+      if (!question || typeof question !== 'object') return { question, score: 0.5 };
+      const item = question as { termId?: unknown; options?: unknown[]; prompt?: unknown; explanation?: unknown };
+      const termIds = new Set<string>();
+
+      if (typeof item.termId === 'string') {
+        const explicitId = resolveTermIdFromFields(lookup, item.termId);
+        if (explicitId) termIds.add(explicitId);
+      }
+      if (Array.isArray(item.options)) {
+        item.options.forEach((option) => {
+          if (typeof option !== 'string') return;
+          const id = resolveTermIdFromFields(lookup, undefined, option);
+          if (id) termIds.add(id);
+        });
+      }
+      if (typeof item.prompt === 'string') {
+        const id = resolveTermIdFromFields(lookup, undefined, item.prompt);
+        if (id) termIds.add(id);
+      }
+      if (typeof item.explanation === 'string') {
+        const id = resolveTermIdFromFields(lookup, undefined, item.explanation);
+        if (id) termIds.add(id);
+      }
+
+      const score = termIds.size
+        ? Math.max(...Array.from(termIds).map((id) => snapshots.get(id)?.priority ?? 0.5))
+        : 0.5;
+      return { question, score };
+    });
+
+    const targetRate = studySet.personalization?.targetRate ?? 0.4;
+    const targetCount = Math.max(1, Math.min(roundLimit, Math.round(roundLimit * targetRate)));
+    const sorted = [...scored].sort((a, b) => b.score - a.score);
+    const targeted = sorted.slice(0, targetCount).map((entry) => entry.question);
+    const targetedSet = new Set(targeted);
+    const rest = shuffle(sorted.map((entry) => entry.question).filter((question) => !targetedSet.has(question)));
+    next.questions = [...targeted, ...rest].slice(0, roundLimit);
+    return next;
+  }
+
+  return capGameDataCollections(next, maxItems);
+}
+
 function normalizeForWordGames(term: Term) {
   const cleaned = term.term
     .replace(/\([^)]*\)/g, ' ')
@@ -69,7 +275,7 @@ function scrambleWord(word: string) {
 
 function buildLocalTypeIn(terms: Term[]) {
   return {
-    items: terms.slice(0, 20).map((term) => ({
+    items: terms.map((term) => ({
       id: term.id,
       answer: term.term,
       clue: term.definition,
@@ -275,7 +481,7 @@ function buildLocalSnowman(terms: Term[]) {
 }
 
 function buildLocalQuiz(terms: Term[]) {
-  const selected = terms.slice(0, 10);
+  const selected = terms;
   const questions = selected.map((term, index) => {
     const distractors = shuffle(
       selected
@@ -290,7 +496,8 @@ function buildLocalQuiz(terms: Term[]) {
     const options = shuffle([...distractors, term.term]);
 
     return {
-      id: `${index + 1}`,
+      id: term.id,
+      termId: term.id,
       prompt: `Which term matches this definition? ${term.definition}`,
       options,
       correctIndex: options.findIndex((option) => option === term.term),
@@ -303,7 +510,10 @@ function buildLocalQuiz(terms: Term[]) {
 
 export function buildLocalGameData(gameType: GameType, studySet: StudySet) {
   const { maxTermsPerDeck } = getGenerationLimits();
-  const limitedTerms = sampleUpTo(studySet.terms, maxTermsPerDeck);
+  const limitedTerms =
+    studySet.terms.length > maxTermsPerDeck
+      ? sampleUpTo(studySet.terms, maxTermsPerDeck)
+      : [...studySet.terms];
 
   const localData = (() => {
   switch (gameType) {
@@ -314,9 +524,7 @@ export function buildLocalGameData(gameType: GameType, studySet: StudySet) {
     case GameType.Matching:
       return {
         instructions: 'Match each term to the correct definition.',
-        pairs: shuffle(limitedTerms)
-          .slice(0, 8)
-          .map((term) => ({ id: term.id, term: term.term, definition: term.definition })),
+        pairs: limitedTerms.map((term) => ({ id: term.id, term: term.term, definition: term.definition })),
       };
     case GameType.Quiz:
       return buildLocalQuiz(limitedTerms);
@@ -356,12 +564,13 @@ export async function generateAndCacheGameData(
   const limits = getGenerationLimits();
   const cached = studySet.gameData?.[gameType];
   if (cached && !options?.force) {
-    return { data: capGameDataCollections(cached, limits.maxCardsPerGame), source: 'cache' as const };
+    return { data: capCoreGameData(gameType, cached, studySet, limits.maxCardsPerGame), source: 'cache' as const };
   }
 
   if (
     gameType === GameType.StudyTable ||
     gameType === GameType.Flashcards ||
+    gameType === GameType.Quiz ||
     gameType === GameType.Matching ||
     gameType === GameType.TypeIn ||
     gameType === GameType.HungryBug ||
@@ -375,47 +584,10 @@ export async function generateAndCacheGameData(
   ) {
     const localData = buildLocalGameData(gameType, studySet);
     studySetStore.updateGameData(studySet.id, gameType, localData);
-    return { data: capGameDataCollections(localData, limits.maxCardsPerGame), source: 'local' as const };
-  }
-
-  if (gameType === GameType.Quiz) {
-    const settings = aiSettingsStore.get();
-    const sampledTerms = sampleUpTo(studySet.terms, limits.maxTermsPerDeck);
-    const response = await fetch('/api/generate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAnalyticsRequestHeaders(),
-      },
-      body: JSON.stringify({
-        mode: 'game-data',
-        gameType,
-        terms: sampledTerms.map((term) => ({ term: term.term, definition: term.definition })),
-        settings,
-      }),
-    });
-
-    const payload = (await response.json()) as { data?: unknown; warning?: string; error?: unknown; source?: string };
-
-    if (!response.ok || !payload.data) {
-      const localData = buildLocalGameData(gameType, studySet);
-      studySetStore.updateGameData(studySet.id, gameType, localData);
-      return {
-        data: capGameDataCollections(localData, limits.maxCardsPerGame),
-        source: 'local' as const,
-        warning: typeof payload.error === 'string' ? payload.error : 'Quiz generation failed. Using local fallback.',
-      };
-    }
-
-    studySetStore.updateGameData(studySet.id, gameType, payload.data);
-    return {
-      data: capGameDataCollections(payload.data, limits.maxCardsPerGame),
-      source: (payload.source as 'llm' | 'fallback' | undefined) ?? 'llm',
-      warning: payload.warning,
-    };
+    return { data: capCoreGameData(gameType, localData, studySet, limits.maxCardsPerGame), source: 'local' as const };
   }
 
   const localData = buildLocalGameData(gameType, studySet);
   studySetStore.updateGameData(studySet.id, gameType, localData);
-  return { data: capGameDataCollections(localData, limits.maxCardsPerGame), source: 'local' as const };
+  return { data: capCoreGameData(gameType, localData, studySet, limits.maxCardsPerGame), source: 'local' as const };
 }

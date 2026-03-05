@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Card } from '@/components/ui/Card';
 import { initGSAP } from '@/lib/gsap';
+import { studySetStore } from '@/lib/storage';
 import type { Term } from '@/types/study-set';
 
 import type { GameComponentProps } from '@/components/games/types';
@@ -59,6 +60,8 @@ function normalizePairs(data: unknown, fallbackTerms: Term[]): Pair[] {
 export function MatchingGame({ studySet, data }: GameComponentProps) {
   const { trackEvent } = useAnalytics();
   const pairs = useMemo(() => normalizePairs(data, studySet.terms), [data, studySet.terms]);
+  const pairById = useMemo(() => new Map(pairs.map((pair) => [pair.id, pair])), [pairs]);
+  const exactTermIdSet = useMemo(() => new Set(studySet.terms.map((term) => term.id)), [studySet.terms]);
   const leftItems = useMemo(() => shuffle(pairs.map((pair) => ({ id: pair.id, label: pair.term }))), [pairs]);
   const rightItems = useMemo(() => shuffle(pairs.map((pair) => ({ id: pair.id, label: pair.definition }))), [pairs]);
 
@@ -74,8 +77,21 @@ export function MatchingGame({ studySet, data }: GameComponentProps) {
   const rightRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const previousMatchedRef = useRef(0);
   const completionTrackedRef = useRef(false);
+  const attemptStartedAtRef = useRef<number | null>(null);
 
   const complete = matchedIds.length === pairs.length && pairs.length > 0;
+
+  const resolveTermId = (pairId: string) => {
+    if (exactTermIdSet.has(pairId)) return pairId;
+    const pair = pairById.get(pairId);
+    if (!pair) return null;
+    const byLabel = studySet.terms.find(
+      (term) =>
+        term.term.trim().toLowerCase() === pair.term.trim().toLowerCase() ||
+        term.definition.trim().toLowerCase() === pair.definition.trim().toLowerCase(),
+    );
+    return byLabel?.id ?? null;
+  };
 
   const animateSelection = (ids: string[], type: 'success' | 'error') => {
     const gsap = initGSAP();
@@ -98,12 +114,22 @@ export function MatchingGame({ studySet, data }: GameComponentProps) {
   };
 
   const resolveAttempt = (leftId: string, rightId: string) => {
+    const responseMs = attemptStartedAtRef.current ? Date.now() - attemptStartedAtRef.current : undefined;
+    attemptStartedAtRef.current = null;
     setAttempts((prev) => prev + 1);
 
     if (leftId === rightId) {
       if (!matchedIds.includes(leftId)) {
         setMatchedIds((prev) => [...prev, leftId]);
         animateSelection([leftId], 'success');
+      }
+      const termId = resolveTermId(leftId);
+      if (termId) {
+        studySetStore.recordPersonalizationAttempt(studySet.id, {
+          termId,
+          result: 'correct',
+          responseMs,
+        });
       }
       setStatus('Nice match. Keep going.');
       trackEvent('matching_attempt', {
@@ -119,6 +145,14 @@ export function MatchingGame({ studySet, data }: GameComponentProps) {
     }
 
     animateSelection([leftId, rightId], 'error');
+    const wrongTermIds = [resolveTermId(leftId), resolveTermId(rightId)].filter((id): id is string => Boolean(id));
+    wrongTermIds.forEach((termId) => {
+      studySetStore.recordPersonalizationAttempt(studySet.id, {
+        termId,
+        result: 'wrong',
+        responseMs,
+      });
+    });
     setStatus('That pair does not match. Try again.');
     trackEvent('matching_attempt', {
       set_id: studySet.id,
@@ -149,12 +183,18 @@ export function MatchingGame({ studySet, data }: GameComponentProps) {
 
   const handleLeftSelect = (id: string) => {
     if (matchedIds.includes(id)) return;
+    if (!selectedRightId) {
+      attemptStartedAtRef.current = Date.now();
+    }
     setSelectedLeftId(id);
     if (selectedRightId) resolveAttempt(id, selectedRightId);
   };
 
   const handleRightSelect = (id: string) => {
     if (matchedIds.includes(id)) return;
+    if (!selectedLeftId) {
+      attemptStartedAtRef.current = Date.now();
+    }
     setSelectedRightId(id);
     if (selectedLeftId) resolveAttempt(selectedLeftId, id);
   };

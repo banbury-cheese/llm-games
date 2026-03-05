@@ -10,7 +10,8 @@ import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Spinner } from '@/components/ui/Spinner';
 import { generateAndCacheGameData } from '@/lib/game-data';
-import { studySetStore } from '@/lib/storage';
+import { computeTermPriority } from '@/lib/personalization';
+import { aiSettingsStore, studySetStore } from '@/lib/storage';
 import { GAME_LABELS, type GameType } from '@/types/game';
 import type { StudySet } from '@/types/study-set';
 
@@ -25,8 +26,16 @@ export default function GamePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [packRefreshing, setPackRefreshing] = useState(false);
   const loadTokenRef = useRef(0);
   const sessionStartMsRef = useRef<number | null>(null);
+  const sessionIncrementedRef = useRef<string | null>(null);
+
+  const isCorePersonalizedGame = gameType === 'flashcards' || gameType === 'quiz' || gameType === 'matching' || gameType === 'type-in';
+  const supportsPersonalizedPack = gameType === 'quiz' || gameType === 'type-in';
+  const perRoundBase = gameType === 'matching' ? 8 : gameType === 'type-in' ? 10 : gameType === 'quiz' ? 10 : 10;
+  const targetRate = studySet?.personalization?.targetRate ?? 0.4;
+  const targetPerRound = Math.max(1, Math.round(perRoundBase * targetRate));
 
   const loadGame = useCallback(async (opts?: { force?: boolean }) => {
     const token = ++loadTokenRef.current;
@@ -82,23 +91,22 @@ export default function GamePage() {
       });
       const result = await generateAndCacheGameData(currentSet, rawGame, { force: opts?.force });
       if (token !== loadTokenRef.current) return;
+      const warning = 'warning' in result ? result.warning : undefined;
       setGameData(result.data);
       setStatus(
         result.source === 'cache'
           ? 'Loaded cached game data.'
-          : result.source === 'llm'
-            ? 'Generated game data via LLM.'
-            : 'Generated local fallback game data.',
+          : 'Generated local game data.',
       );
-      if (result.warning) {
-        setStatus((prev) => `${prev ?? ''} ${result.warning}`.trim());
+      if (warning) {
+        setStatus((prev) => `${prev ?? ''} ${warning}`.trim());
       }
       setStudySet(studySetStore.get(setId));
       trackEvent('game_data_load_result', {
         set_id: setId,
         game_type: rawGame,
         source: result.source,
-        has_warning: Boolean(result.warning),
+        has_warning: Boolean(warning),
         result: 'success',
       });
     } catch (generationError) {
@@ -127,6 +135,11 @@ export default function GamePage() {
 
   useEffect(() => {
     if (loading || error || !activeSetId || !gameType) return;
+    if (sessionIncrementedRef.current !== `${activeSetId}:${gameType}`) {
+      const updated = studySetStore.incrementPersonalizationSession(activeSetId);
+      if (updated) setStudySet(updated);
+      sessionIncrementedRef.current = `${activeSetId}:${gameType}`;
+    }
     const startedAt = Date.now();
     sessionStartMsRef.current = startedAt;
     trackEvent('game_session_start', {
@@ -147,6 +160,69 @@ export default function GamePage() {
       sessionStartMsRef.current = null;
     };
   }, [loading, error, activeSetId, gameType, trackEvent]);
+
+  const refreshPersonalizedPack = useCallback(async () => {
+    if (!studySet || !gameType || !supportsPersonalizedPack) return;
+    setPackRefreshing(true);
+    setError(null);
+    try {
+      const settings = aiSettingsStore.get();
+      const priorities = computeTermPriority(studySet);
+      const weakTermIds = priorities
+        .filter((entry) => entry.isWeak)
+        .map((entry) => entry.termId)
+        .slice(0, 16);
+      const prioritizedIds = priorities.map((entry) => entry.termId).slice(0, 16);
+      const selectedIds = weakTermIds.length ? weakTermIds : prioritizedIds;
+      const targetTerms = studySet.terms
+        .filter((term) => selectedIds.includes(term.id))
+        .slice(0, 16)
+        .map((term) => ({ id: term.id, term: term.term, definition: term.definition }));
+
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mode: 'personalized-pack',
+          gameType,
+          weakTermIds,
+          targetTerms,
+          tutorInstruction: studySet.tutorInstruction,
+          settings,
+        }),
+      });
+
+      const payload = (await response.json()) as { data?: unknown; warning?: string; source?: string; error?: unknown };
+      if (!response.ok || !payload.data) {
+        throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to refresh personalized pack.');
+      }
+
+      studySetStore.updateGameData(studySet.id, gameType, payload.data);
+      setGameData(payload.data);
+      setStatus(
+        `${payload.source === 'llm' ? 'Personalized pack refreshed via LLM.' : 'Personalized pack refreshed via fallback.'}${payload.warning ? ` ${payload.warning}` : ''}`,
+      );
+      const refreshed = studySetStore.get(studySet.id);
+      if (refreshed) setStudySet(refreshed);
+      trackEvent('personalized_pack_refresh', {
+        set_id: studySet.id,
+        game_type: gameType,
+        source: payload.source ?? 'unknown',
+        result: 'success',
+      });
+    } catch (packError) {
+      setError(packError instanceof Error ? packError.message : 'Unable to refresh personalized pack.');
+      trackEvent('personalized_pack_refresh', {
+        set_id: studySet.id,
+        game_type: gameType,
+        result: 'error',
+      });
+    } finally {
+      setPackRefreshing(false);
+    }
+  }, [gameType, studySet, supportsPersonalizedPack, trackEvent]);
 
   const title = useMemo(() => (gameType ? GAME_LABELS[gameType] : 'Game'), [gameType]);
 
@@ -208,8 +284,28 @@ export default function GamePage() {
             <p className="max-w-2xl text-sm leading-6 text-[var(--text-muted)] sm:text-base">
               {status || 'Choose answers, flip cards, or match pairs to practice the set.'}
             </p>
+            {isCorePersonalizedGame ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span
+                  className={`rounded-full px-3 py-1 font-semibold uppercase tracking-[0.14em] ${studySet.personalization?.enabled ? 'bg-olive text-black' : 'border'}`}
+                  style={studySet.personalization?.enabled ? undefined : { borderColor: 'var(--border)' }}
+                >
+                  {studySet.personalization?.enabled ? 'Personalized for you' : 'Personalization off'}
+                </span>
+                {studySet.personalization?.enabled ? (
+                  <span className="rounded-full border px-3 py-1 font-semibold tracking-[0.08em]" style={{ borderColor: 'var(--border)' }}>
+                    {targetPerRound} of {perRoundBase} targeted
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {supportsPersonalizedPack && studySet.personalization?.enabled ? (
+              <Button type="button" variant="ghost" onClick={() => void refreshPersonalizedPack()} loading={packRefreshing}>
+                Refresh Personalized Pack
+              </Button>
+            ) : null}
             {isGameAvailableInCurrentBuild(gameType) ? (
               <Button
                 type="button"

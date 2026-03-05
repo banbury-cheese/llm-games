@@ -7,6 +7,10 @@ export const termSchema = z.object({
   definition: z.string().min(1).max(800),
 });
 
+export const targetTermSchema = termSchema.extend({
+  id: z.string().min(1),
+});
+
 export const termExtractionSchema = z.object({
   title: z.string().min(1).max(120),
   description: z.string().min(1).max(240),
@@ -30,6 +34,7 @@ export const matchingGameSchema = z.object({
 
 export const quizQuestionSchema = z.object({
   id: z.string().min(1),
+  termId: z.string().min(1).optional(),
   prompt: z.string().min(1),
   options: z.array(z.string().min(1)).length(4),
   correctIndex: z.number().int().min(0).max(3),
@@ -38,13 +43,30 @@ export const quizQuestionSchema = z.object({
 
 export const quizGameSchema = z.object({
   title: z.string().min(1),
-  questions: z.array(quizQuestionSchema).min(5).max(12),
+  questions: z.array(quizQuestionSchema).min(5).max(80),
 });
 
 export const genericGameDataSchema = z.object({
   items: z.array(z.unknown()),
   note: z.string(),
 });
+
+export const typeInItemSchema = z.object({
+  id: z.string().min(1).optional(),
+  answer: z.string().min(1),
+  clue: z.string().min(1),
+  hint: z.string().min(1).optional(),
+});
+
+export const typeInGameSchema = z.object({
+  items: z.array(typeInItemSchema).min(1).max(120),
+  note: z.string().optional(),
+});
+
+export const personalizedPackGameTypeSchema = z.union([
+  z.literal(GameType.Quiz),
+  z.literal(GameType.TypeIn),
+]);
 
 export const chatRequestSchema = z.object({
   setTitle: z.string().min(1).max(120).optional(),
@@ -66,12 +88,14 @@ export const chatRequestSchema = z.object({
 });
 
 export const generateRouteSchema = z.object({
-  mode: z.enum(['extract-terms', 'game-data']),
+  mode: z.enum(['extract-terms', 'game-data', 'personalized-pack']),
   inputText: z.string().min(1).optional(),
   topic: z.string().min(1).optional(),
   tutorInstruction: z.string().min(1).max(1200).optional(),
   gameType: z.nativeEnum(GameType).optional(),
   terms: z.array(termSchema).optional(),
+  targetTerms: z.array(targetTermSchema).max(120).optional(),
+  weakTermIds: z.array(z.string().min(1)).max(120).optional(),
   settings: z.object({
     provider: z.enum(['openai', 'anthropic', 'google']),
     model: z.string().min(1),
@@ -85,7 +109,7 @@ export const gameSchemaByType = {
   [GameType.Flashcards]: flashcardsSchema,
   [GameType.Matching]: matchingGameSchema,
   [GameType.Quiz]: quizGameSchema,
-  [GameType.TypeIn]: genericGameDataSchema,
+  [GameType.TypeIn]: typeInGameSchema,
   [GameType.HungryBug]: genericGameDataSchema,
   [GameType.Crossword]: genericGameDataSchema,
   [GameType.Test]: genericGameDataSchema,
@@ -95,6 +119,11 @@ export const gameSchemaByType = {
   [GameType.StudyTable]: genericGameDataSchema,
   [GameType.Chopped]: genericGameDataSchema,
   [GameType.ChatBot]: genericGameDataSchema,
+} as const;
+
+export const personalizedPackSchemaByType = {
+  [GameType.Quiz]: quizGameSchema,
+  [GameType.TypeIn]: typeInGameSchema,
 } as const;
 
 export type TermExtractionResult = z.infer<typeof termExtractionSchema>;

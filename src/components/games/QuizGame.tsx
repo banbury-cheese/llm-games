@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAnalytics } from '@/components/analytics/AnalyticsProvider';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useChatTutor } from '@/lib/chat-tutor';
+import { studySetStore } from '@/lib/storage';
 import type { Term } from '@/types/study-set';
 
 import type { GameComponentProps } from '@/components/games/types';
@@ -16,6 +17,7 @@ interface QuizQuestion {
   options: string[];
   correctIndex: number;
   explanation?: string;
+  termId?: string;
 }
 
 function buildFallbackQuiz(terms: Term[]): QuizQuestion[] {
@@ -51,6 +53,7 @@ function normalizeQuestions(data: unknown, fallbackTerms: Term[]): QuizQuestion[
           options,
           correctIndex: typeof item.correctIndex === 'number' ? item.correctIndex : -1,
           explanation: typeof item.explanation === 'string' ? item.explanation : undefined,
+          termId: typeof item.termId === 'string' ? item.termId : undefined,
         } satisfies QuizQuestion;
       })
       .filter(
@@ -99,8 +102,13 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [showResults, setShowResults] = useState(false);
+  const questionShownAtRef = useRef<Record<string, number>>({});
 
   const currentQuestion = questions[currentIndex];
+  const termByName = useMemo(
+    () => new Map(studySet.terms.map((term) => [term.term.trim().toLowerCase(), term.id])),
+    [studySet.terms],
+  );
   const answeredCount = Object.keys(answers).length;
   const progress = questions.length ? (answeredCount / questions.length) * 100 : 0;
 
@@ -109,6 +117,44 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
       return total + (answers[question.id] === question.correctIndex ? 1 : 0);
     }, 0);
   }, [answers, questions]);
+
+  useEffect(() => {
+    if (!currentQuestion) return;
+    if (questionShownAtRef.current[currentQuestion.id]) return;
+    questionShownAtRef.current[currentQuestion.id] = Date.now();
+  }, [currentQuestion]);
+
+  const resolveTermIdForQuestion = (question: QuizQuestion) => {
+    if (question.termId) return question.termId;
+    const definitionMatch = studySet.terms.find((term) => question.prompt.includes(term.definition));
+    if (definitionMatch) return definitionMatch.id;
+    const answerLabel = question.options[question.correctIndex]?.trim().toLowerCase();
+    if (answerLabel) {
+      const exact = termByName.get(answerLabel);
+      if (exact) return exact;
+    }
+    return null;
+  };
+
+  const openAiExplain = (question: QuizQuestion, answerIndex: number | undefined) => {
+    trackEvent('quiz_ai_explain_open', {
+      set_id: studySet.id,
+      game_type: 'quiz',
+      result: typeof answerIndex === 'number' ? 'selected' : 'none',
+    });
+    trackEvent('quiz_ai_explain', {
+      set_id: studySet.id,
+      game_type: 'quiz',
+    });
+    openTutor({
+      sessionKey: `study-set:${studySet.id}`,
+      setTitle: studySet.title,
+      tutorInstruction: studySet.tutorInstruction,
+      terms: studySet.terms,
+      initialMessage: buildQuizExplainPrompt(question, answerIndex),
+      autoSend: true,
+    });
+  };
 
   if (!questions.length) {
     return (
@@ -219,25 +265,6 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
   const selectedIndex = answers[currentQuestion.id];
   const isAnswered = typeof selectedIndex === 'number';
   const isCorrect = isAnswered && selectedIndex === currentQuestion.correctIndex;
-  const openAiExplain = (question: QuizQuestion, answerIndex: number | undefined) => {
-    trackEvent('quiz_ai_explain_open', {
-      set_id: studySet.id,
-      game_type: 'quiz',
-      result: typeof answerIndex === 'number' ? 'selected' : 'none',
-    });
-    trackEvent('quiz_ai_explain', {
-      set_id: studySet.id,
-      game_type: 'quiz',
-    });
-    openTutor({
-      sessionKey: `study-set:${studySet.id}`,
-      setTitle: studySet.title,
-      tutorInstruction: studySet.tutorInstruction,
-      terms: studySet.terms,
-      initialMessage: buildQuizExplainPrompt(question, answerIndex),
-      autoSend: true,
-    });
-  };
 
   return (
     <div className="space-y-4">
@@ -297,12 +324,27 @@ export function QuizGame({ studySet, data }: GameComponentProps) {
                     name={currentQuestion.id}
                     checked={checked}
                     onChange={() => {
+                      const responseMs = questionShownAtRef.current[currentQuestion.id]
+                        ? Date.now() - questionShownAtRef.current[currentQuestion.id]
+                        : undefined;
+                      const isFirstAttempt = typeof answers[currentQuestion.id] !== 'number';
                       setAnswers((prev) => ({ ...prev, [currentQuestion.id]: optionIndex }));
                       trackEvent('quiz_answer_select', {
                         set_id: studySet.id,
                         index: currentIndex,
                         selected: optionIndex,
                       });
+                      if (isFirstAttempt) {
+                        const termId = resolveTermIdForQuestion(currentQuestion);
+                        if (termId) {
+                          const isCorrectAnswer = optionIndex === currentQuestion.correctIndex;
+                          studySetStore.recordPersonalizationAttempt(studySet.id, {
+                            termId,
+                            result: isCorrectAnswer ? 'correct' : 'wrong',
+                            responseMs,
+                          });
+                        }
+                      }
                     }}
                     className="mt-1"
                   />

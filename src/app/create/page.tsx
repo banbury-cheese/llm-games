@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/Input';
 import { TextArea } from '@/components/ui/TextArea';
 import { getAnalyticsRequestHeaders } from '@/lib/analytics/session';
 import { extractTextFromPdf } from '@/lib/pdf';
+import { createDefaultDeckPersonalizationState, resetDeckProgress } from '@/lib/personalization';
 import { aiSettingsStore, studySetStore } from '@/lib/storage';
 import { DEFAULT_AI_SETTINGS } from '@/types/settings';
 import type { SourceType, StudySet, Term } from '@/types/study-set';
@@ -275,6 +276,9 @@ function CreatePageContent() {
         terms: cleanedTerms,
         updatedAt: now,
         gameData: cacheShouldReset ? {} : editSourceSet.gameData,
+        personalization: cacheShouldReset
+          ? resetDeckProgress(editSourceSet, { keepConfig: true, at: now })
+          : editSourceSet.personalization,
       };
 
       studySetStore.upsert(updatedSet);
@@ -301,6 +305,7 @@ function CreatePageContent() {
       createdAt: now,
       updatedAt: now,
       gameData: {},
+      personalization: createDefaultDeckPersonalizationState({ enabled: true, now }),
     };
 
     studySetStore.upsert(studySet);

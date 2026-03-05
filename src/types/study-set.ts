@@ -1,3 +1,5 @@
+import type { DeckPersonalizationState } from '@/types/personalization';
+
 export interface Term {
   id: string;
   term: string;
@@ -17,4 +19,5 @@ export interface StudySet {
   createdAt: number;
   updatedAt?: number;
   gameData: Record<string, unknown>;
+  personalization?: DeckPersonalizationState;
 }
