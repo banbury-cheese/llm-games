@@ -1,41 +1,39 @@
 import { NextResponse } from 'next/server';
-import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { getAnalyticsHeaders, trackServerApiRequest } from '@/lib/analytics/server';
 
 export const runtime = 'nodejs';
 
-const execFileAsync = promisify(execFile);
+async function extractTextWithPdfJs(buffer: ArrayBuffer) {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const bytes = new Uint8Array(buffer);
 
-async function extractTextWithNodeScript(buffer: ArrayBuffer) {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-games-pdf-'));
-  const inputPath = path.join(tempDir, 'upload.pdf');
-  const scriptPath = path.join(process.cwd(), 'scripts', 'pdf-extract.mjs');
+  const loadingTask = pdfjs.getDocument({
+    data: bytes,
+    useSystemFonts: true,
+    isEvalSupported: false,
+  });
 
   try {
-    await fs.writeFile(inputPath, Buffer.from(buffer));
+    const pdf = await loadingTask.promise;
+    const pageTexts: string[] = [];
 
-    const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath, inputPath], {
-      maxBuffer: 20 * 1024 * 1024,
-    });
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const text = content.items
+        .map((item) => ('str' in item && typeof item.str === 'string' ? item.str : ''))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 
-    if (stderr?.trim()) {
-      // Keep stderr visible in dev in case pdfjs emits warnings.
-      console.warn('[pdf-extract] worker stderr:', stderr.trim());
+      if (text) pageTexts.push(text);
+      page.cleanup();
     }
 
-    const payload = JSON.parse(stdout) as { text?: string; error?: string };
-    if (typeof payload.text !== 'string') {
-      throw new Error(payload.error || 'PDF extraction script returned no text.');
-    }
-
-    return payload.text;
+    return pageTexts.join('\n\n');
   } finally {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await loadingTask.destroy();
   }
 }
 
@@ -90,7 +88,7 @@ export async function POST(request: Request) {
       },
     });
 
-    const text = await extractTextWithNodeScript(buffer);
+    const text = await extractTextWithPdfJs(buffer);
     const response = NextResponse.json({ text });
     await trackServerApiRequest({
       clientId: analytics.clientId,
