@@ -31,7 +31,7 @@ export function isAnalyticsEnvironmentEnabled(config = getAnalyticsConfig()) {
   return config.env === 'production';
 }
 
-function ensureGtagBootstrap(measurementId: string, sessionId: string) {
+function ensureGtagBootstrap(measurementId: string, sessionId: string, debugMode: boolean) {
   if (!isBrowser()) return;
 
   window.dataLayer = window.dataLayer || [];
@@ -46,6 +46,7 @@ function ensureGtagBootstrap(measurementId: string, sessionId: string) {
     send_page_view: false,
     anonymize_ip: true,
     client_id: sessionId,
+    debug_mode: debugMode,
   });
 }
 
@@ -53,13 +54,13 @@ export function loadGoogleAnalytics(config = getAnalyticsConfig()) {
   if (!isBrowser() || scriptLoaded || !isAnalyticsEnvironmentEnabled(config)) return;
 
   const sessionId = getOrCreateAnalyticsSessionId();
-  ensureGtagBootstrap(config.measurementId, sessionId);
+  ensureGtagBootstrap(config.measurementId, sessionId, config.forceEnabled);
 
   const script = document.createElement('script');
   script.async = true;
   script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(config.measurementId)}`;
   script.onload = () => {
-    ensureGtagBootstrap(config.measurementId, sessionId);
+    ensureGtagBootstrap(config.measurementId, sessionId, config.forceEnabled);
   };
   document.head.appendChild(script);
 
@@ -70,7 +71,7 @@ function withBaseParams(params: AnalyticsEventParams | undefined) {
   const sessionId = getOrCreateAnalyticsSessionId();
   return sanitizeAnalyticsParams({
     ...params,
-    session_id: sessionId,
+    analytics_session_id: sessionId,
   });
 }
 
@@ -83,4 +84,3 @@ export function trackAnalyticsPageView(path: string) {
   if (!isBrowser() || !window.gtag) return;
   window.gtag('event', 'page_view', withBaseParams({ path }));
 }
-

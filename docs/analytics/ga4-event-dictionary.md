@@ -25,6 +25,7 @@
 - `api_mode`
 - `provider`
 - `speed_preset`
+- `analytics_session_id`
 
 ## Global Events
 - `page_view`

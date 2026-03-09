@@ -129,7 +129,7 @@ const ALLOWED_PARAM_KEYS = new Set([
   'lives',
   'reason',
   'consent',
-  'session_id',
+  'analytics_session_id',
   'env',
   'provider',
   'has_warning',

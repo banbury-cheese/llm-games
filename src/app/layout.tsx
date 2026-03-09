@@ -6,6 +6,7 @@ import { Nav } from '@/components/layout/Nav';
 import { PageTransition } from '@/components/layout/PageTransition';
 import { AnalyticsProvider } from '@/components/analytics/AnalyticsProvider';
 import { ConsentBanner } from '@/components/analytics/ConsentBanner';
+import { VercelAnalyticsGate } from '@/components/analytics/VercelAnalyticsGate';
 import { ChatTutorProvider } from '@/lib/chat-tutor';
 import { ThemeProvider } from '@/lib/theme';
 
@@ -57,6 +58,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
                 </div>
               </ChatTutorProvider>
               <ConsentBanner />
+              <VercelAnalyticsGate />
             </AnalyticsProvider>
           </Suspense>
         </ThemeProvider>
