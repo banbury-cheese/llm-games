@@ -1,93 +1,77 @@
+import { execFile } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+
 import { NextResponse } from 'next/server';
 
 import { getAnalyticsHeaders, trackServerApiRequest } from '@/lib/analytics/server';
 
 export const runtime = 'nodejs';
 
-let pdfRuntimeReadyPromise: Promise<void> | null = null;
-let pdfWorkerReadyPromise: Promise<void> | null = null;
+const execFileAsync = promisify(execFile);
+const EXTRACT_SCRIPT_PATH = path.join(process.cwd(), 'scripts', 'pdf-extract.mjs');
+const EXTRACT_TIMEOUT_MS = 45_000;
+const EXTRACT_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
-async function ensurePdfRuntimePolyfills() {
-  if (pdfRuntimeReadyPromise) {
-    return pdfRuntimeReadyPromise;
+type ExtractScriptOutput = {
+  text?: string;
+  error?: string;
+};
+
+function parseScriptOutput(raw: string): ExtractScriptOutput {
+  const parsed = JSON.parse(raw) as ExtractScriptOutput;
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('PDF extraction script returned an invalid payload.');
   }
-
-  pdfRuntimeReadyPromise = (async () => {
-    const globals = globalThis as {
-      DOMMatrix?: unknown;
-      ImageData?: unknown;
-      Path2D?: unknown;
-      [key: string]: unknown;
-    };
-
-    if (globals.DOMMatrix && globals.ImageData && globals.Path2D) {
-      return;
-    }
-
-    try {
-      const canvas = await import('@napi-rs/canvas');
-
-      if (!globals.DOMMatrix && canvas.DOMMatrix) {
-        globals.DOMMatrix = canvas.DOMMatrix;
-      }
-      if (!globals.ImageData && canvas.ImageData) {
-        globals.ImageData = canvas.ImageData;
-      }
-      if (!globals.Path2D && canvas.Path2D) {
-        globals.Path2D = canvas.Path2D;
-      }
-    } catch (error) {
-      console.warn('[pdf-extract] Failed to load @napi-rs/canvas polyfills:', error);
-    }
-  })();
-
-  return pdfRuntimeReadyPromise;
+  return parsed;
 }
 
-async function extractTextWithPdfJs(buffer: ArrayBuffer) {
-  await ensurePdfRuntimePolyfills();
-  if (!pdfWorkerReadyPromise) {
-    pdfWorkerReadyPromise = import('pdfjs-dist/legacy/build/pdf.worker.mjs')
-      .then(() => undefined)
-      .catch((error) => {
-        console.warn('[pdf-extract] Failed to preload pdf.worker.mjs:', error);
-      });
+function extractScriptErrorMessage(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('stdout' in error)) {
+    return null;
   }
-  await pdfWorkerReadyPromise;
 
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const globalWorkerOptions = pdfjs.GlobalWorkerOptions as { workerSrc?: string };
-  if (!globalWorkerOptions.workerSrc || globalWorkerOptions.workerSrc === './pdf.worker.mjs') {
-    globalWorkerOptions.workerSrc = 'pdfjs-dist/legacy/build/pdf.worker.mjs';
+  const stdout = (error as { stdout?: string }).stdout;
+  if (!stdout) {
+    return null;
   }
-  const bytes = new Uint8Array(buffer);
-
-  const loadingTask = pdfjs.getDocument({
-    data: bytes,
-    useSystemFonts: true,
-    isEvalSupported: false,
-  });
 
   try {
-    const pdf = await loadingTask.promise;
-    const pageTexts: string[] = [];
+    const output = parseScriptOutput(stdout);
+    return output.error ?? null;
+  } catch {
+    return null;
+  }
+}
 
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber);
-      const content = await page.getTextContent();
-      const text = content.items
-        .map((item) => ('str' in item && typeof item.str === 'string' ? item.str : ''))
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+async function extractText(buffer: ArrayBuffer): Promise<string> {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-games-pdf-'));
+  const inputPath = path.join(tempDir, 'upload.pdf');
+  try {
+    await fs.writeFile(inputPath, Buffer.from(buffer));
 
-      if (text) pageTexts.push(text);
-      page.cleanup();
+    const { stdout } = await execFileAsync(process.execPath, [EXTRACT_SCRIPT_PATH, inputPath], {
+      timeout: EXTRACT_TIMEOUT_MS,
+      maxBuffer: EXTRACT_MAX_BUFFER_BYTES,
+    });
+
+    const output = parseScriptOutput(stdout);
+    if (output.error) {
+      throw new Error(output.error);
     }
 
-    return pageTexts.join('\n\n');
+    return (output.text ?? '').trim();
+  } catch (error) {
+    const scriptErrorMessage = extractScriptErrorMessage(error);
+    if (scriptErrorMessage) {
+      throw new Error(scriptErrorMessage);
+    }
+
+    throw error;
   } finally {
-    await loadingTask.destroy();
+    await fs.rm(tempDir, { recursive: true, force: true });
   }
 }
 
@@ -142,7 +126,7 @@ export async function POST(request: Request) {
       },
     });
 
-    const text = await extractTextWithPdfJs(buffer);
+    const text = await extractText(buffer);
     const response = NextResponse.json({ text });
     await trackServerApiRequest({
       clientId: analytics.clientId,

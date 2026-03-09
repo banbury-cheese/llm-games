@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { PDFParse } from 'pdf-parse';
 
 async function main() {
   const inputPath = process.argv[2];
@@ -9,32 +10,14 @@ async function main() {
   }
 
   try {
-    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-    const bytes = new Uint8Array(await fs.readFile(inputPath));
-
-    const loadingTask = pdfjs.getDocument({
-      data: bytes,
-    });
+    const bytes = await fs.readFile(inputPath);
+    const parser = new PDFParse({ data: bytes });
 
     try {
-      const pdf = await loadingTask.promise;
-      const pageTexts = [];
-
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-        const page = await pdf.getPage(pageNumber);
-        const content = await page.getTextContent();
-        const text = content.items
-          .map((item) => ('str' in item ? item.str : ''))
-          .join(' ')
-          .replace(/\\s+/g, ' ')
-          .trim();
-
-        if (text) pageTexts.push(text);
-      }
-
-      process.stdout.write(JSON.stringify({ text: pageTexts.join('\\n\\n') }));
+      const result = await parser.getText();
+      process.stdout.write(JSON.stringify({ text: (result.text ?? '').trim() }));
     } finally {
-      await loadingTask.destroy();
+      await parser.destroy();
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to extract PDF text.';

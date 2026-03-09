@@ -48,7 +48,7 @@ export function UploadZone({ onFileSelected, loading = false, fileName, helperTe
         <div className="space-y-1">
           <p className="text-sm font-semibold">Upload a PDF</p>
           <p className="text-sm leading-6 text-[var(--text-muted)]">
-            Drag and drop a PDF or choose a file. We extract text in-browser using `pdfjs-dist`.
+            Drag and drop a PDF or choose a file. We extract text server-side for better compatibility.
           </p>
           {fileName ? <p className="text-xs font-semibold text-olive">Loaded: {fileName}</p> : null}
           {helperText ? <p className="text-xs text-[var(--text-muted)]">{helperText}</p> : null}
